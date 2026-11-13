@@ -145,6 +145,10 @@ jobs:
   release:
     name: Publish Release
     needs: [android, windows]
+    # 只有推 tag 时才发布。手动触发（workflow_dispatch）时 github.ref 指向分支，
+    # action-gh-release 会拿它当 tag 去更新，被 GitHub 判为越权（Resource not accessible）。
+    # 手动触发只用于验证两个平台能否构建，产物留在 artifacts 里。
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
