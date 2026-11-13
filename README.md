@@ -34,7 +34,7 @@ Poqi 是一个可编程的影视聚合器：**插件 = 一套规则（声明式 
 ```bash
 flutter pub get
 flutter run -d <device>
-flutter test          # 55 个测试：表达式 / 解析 / 补丁 / 插件流转 / 端到端冒烟
+flutter test          # 61 个测试：表达式 / 解析 / 补丁 / 存储 / 插件流转 / MCP / 冒烟
 node tool/js_runtime_test.js   # JS 运行时与内置脚本的离线验证（9 组断言）
 ```
 
