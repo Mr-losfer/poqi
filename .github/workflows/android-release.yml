@@ -25,22 +25,29 @@ jobs:
           flutter-version: '3.24.5'
           channel: stable
 
+      # 签名密钥随仓库提交，保证 CI 与本地构建签名一致，用户才能覆盖安装更新
+      - name: 校验签名密钥
+        run: |
+          test -f android/app/poqi-release.jks || { echo "缺少 android/app/poqi-release.jks"; exit 1; }
+          test -f android/key.properties     || { echo "缺少 android/key.properties"; exit 1; }
+
       - name: 依赖与测试
         run: |
           flutter pub get
           flutter test
 
+      # 使用通用包而非 split-per-abi：应用内更新按第一个 .apk 资源下载，
+      # 单包可避免下载到与设备 ABI 不匹配的安装包。
       - name: 构建 APK
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release
 
       - name: 生成校验与重命名
         id: artifact
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p out
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "out/poqi-$VERSION-arm64-v8a.apk"
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "out/poqi-$VERSION-armeabi-v7a.apk"
-          cp build/app/outputs/flutter-apk/app-x86_64-release.apk "out/poqi-$VERSION-x86_64.apk" || true
+          cp build/app/outputs/flutter-apk/app-release.apk "out/poqi-$VERSION.apk"
+          cp version.json out/version.json
           cd out && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -52,5 +59,6 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            out/*.apk
+            out/poqi-${{ steps.artifact.outputs.version }}.apk
             out/SHA256SUMS.txt
+            out/version.json

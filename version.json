@@ -9,7 +9,8 @@
     {
       "name": "poqi-1.0.0.apk",
       "url": "https://github.com/losfer/poqi/releases/download/v1.0.0/poqi-1.0.0.apk",
-      "size": 0
+      "size": 56363508,
+      "sha256": "f174991a25e11a912c2f09bc624f0c1a3951f936ea55982578deb1ee81131618"
     }
   ]
 }
