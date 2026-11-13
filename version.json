@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "tag": "v1.0.0",
+  "channel": "stable",
+  "notes": "首个版本：插件工坊、局域网 MCP、设备同步、全站聚合搜索与播放器。",
+  "publishedAt": "2026-11-13T00:00:00Z",
+  "htmlUrl": "https://github.com/losfer/poqi/releases/tag/v1.0.0",
+  "assets": [
+    {
+      "name": "poqi-1.0.0.apk",
+      "url": "https://github.com/losfer/poqi/releases/download/v1.0.0/poqi-1.0.0.apk",
+      "size": 0
+    }
+  ]
+}
