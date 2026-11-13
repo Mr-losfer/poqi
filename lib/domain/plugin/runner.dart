@@ -7,6 +7,8 @@ import '../models/plugin.dart';
 import '../models/site.dart';
 import 'demo_catalog.dart';
 import 'expr.dart';
+import 'js/js_host.dart';
+import 'js/js_normalize.dart';
 import 'parse.dart';
 
 /// 站点执行器：UI 只依赖这个接口，不关心是 HTTP 还是演示引擎。
@@ -220,6 +222,68 @@ class HttpSiteRunner implements SiteRunner {
     );
   }
 
+  /// 把 Dart 侧的上下文交给 JS 函数，返回脚本产出的裸结构。
+  Object? _callJs(
+    EndpointSpec ep,
+    String endpoint,
+    ExprContext ctx,
+    PqHttpResponse resp,
+  ) {
+    return JsHost.call(
+      pluginId: plugin.id,
+      script: plugin.script,
+      function: ep.jsFunctionFor(endpoint),
+      context: {
+        'endpoint': endpoint,
+        'body': resp.body,
+        'json': resp.json,
+        'url': resp.finalUrl,
+        'status': resp.statusCode,
+        'headers': resp.headers,
+        'base': baseUrl,
+        'cfg': _cfgMap(),
+        'vars': ctx.vars['vars'] ?? const <String, Object?>{},
+        'page': ctx.vars['page'] ?? 1,
+        'keyword': ctx.vars['keyword'] ?? '',
+        'category': ctx.vars['category'] ?? '',
+        'filters': ctx.vars['filters'] ?? const <String, String>{},
+        'id': ctx.vars['id'] ?? '',
+        'site': {'id': site.id, 'name': site.name},
+      },
+    );
+  }
+
+  Object? _callJsPlay(
+    EndpointSpec ep,
+    ExprContext ctx,
+    PqHttpResponse? resp,
+    String episodeUrl,
+  ) {
+    return JsHost.call(
+      pluginId: plugin.id,
+      script: plugin.script,
+      function: ep.jsFunctionFor('play'),
+      context: {
+        'endpoint': 'play',
+        'body': resp?.body ?? '',
+        'json': resp?.json,
+        'url': resp?.finalUrl ?? episodeUrl,
+        'status': resp?.statusCode ?? 0,
+        'headers': resp?.headers ?? const <String, String>{},
+        'base': baseUrl,
+        'cfg': _cfgMap(),
+        'vars': ctx.vars['vars'] ?? const <String, Object?>{},
+        'page': 1,
+        'keyword': '',
+        'category': '',
+        'filters': const <String, String>{},
+        // 播放端点里 id 就是剧集地址，脚本可直接返回它。
+        'id': episodeUrl,
+        'site': {'id': site.id, 'name': site.name},
+      },
+    );
+  }
+
   Future<PqHttpResponse> _send(
     EndpointSpec ep,
     ExprContext ctx, {
@@ -264,8 +328,11 @@ class HttpSiteRunner implements SiteRunner {
   }) async {
     final ep = plugin.endpoints[endpointName];
     if (ep == null) throw PqHttpException('插件未声明 $endpointName 端点');
+    final useJs = plugin.engine == PluginEngine.js;
     final parse = ep.parse;
-    if (parse == null) throw PqHttpException('$endpointName 缺少 parse 配置');
+    if (parse == null && !useJs) {
+      throw PqHttpException('$endpointName 缺少 parse 配置（JS 插件则应提供 script）');
+    }
 
     final ctx = await _context(
       page: page,
@@ -288,8 +355,22 @@ class HttpSiteRunner implements SiteRunner {
       );
     }
 
+    if (useJs) {
+      final raw = _callJs(ep, endpointName, ctx, resp);
+      final items = JsNormalizer.items(
+        raw,
+        baseUrl: resp.finalUrl,
+        sourceId: site.id,
+        sourceName: site.name,
+      );
+      final hasMore = ep.pageSize != null
+          ? items.length >= ep.pageSize!
+          : items.length >= 12;
+      return MediaPage(items: items, page: page, hasMore: hasMore);
+    }
+
     final parsed = await DeclarativeParser().records(
-      spec: parse,
+      spec: parse!,
       body: resp.body,
       url: resp.finalUrl,
       base: ctx,
@@ -346,8 +427,9 @@ class HttpSiteRunner implements SiteRunner {
   Future<MediaDetail> detail(String id) async {
     final ep = plugin.endpoints['detail'];
     if (ep == null) throw PqHttpException('插件未声明 detail 端点');
+    final useJs = plugin.engine == PluginEngine.js;
     final parse = ep.parse;
-    if (parse == null) throw PqHttpException('detail 缺少 parse 配置');
+    if (parse == null && !useJs) throw PqHttpException('detail 缺少 parse 配置');
 
     final ctx = await _context(id: id);
     final resp = await _send(ep, ctx);
@@ -355,8 +437,23 @@ class HttpSiteRunner implements SiteRunner {
       throw PqHttpException('HTTP ${resp.statusCode}', statusCode: resp.statusCode, url: resp.finalUrl);
     }
 
+    if (useJs) {
+      final raw = _callJs(ep, 'detail', ctx, resp);
+      final detail = JsNormalizer.detail(
+        raw,
+        baseUrl: resp.finalUrl,
+        sourceId: site.id,
+        sourceName: site.name,
+        fallbackId: id,
+      );
+      if (detail.item.title.isEmpty) {
+        throw PluginParseException('JS 详情返回为空，检查 detail() 的返回值', resp.finalUrl);
+      }
+      return detail;
+    }
+
     final parsed = await DeclarativeParser().records(
-      spec: parse,
+      spec: parse!,
       body: resp.body,
       url: resp.finalUrl,
       base: ctx,
@@ -376,17 +473,45 @@ class HttpSiteRunner implements SiteRunner {
 
     final lines = <PlayLine>[];
     if (parse.episodes != null) {
-      final eps = await DeclarativeParser().records(
-        spec: parse.episodes!,
-        body: resp.body,
-        url: resp.finalUrl,
-        base: ctx,
-      );
-      lines.addAll(linesFromRecords(
-        eps.value,
-        baseUrl: resp.finalUrl,
-        defaultLineName: '默认线路',
-      ));
+      final epSpec = parse.episodes!;
+      if (epSpec.format == ParseFormat.split) {
+        // split 分支不针对响应体，而是对详情记录（rec）求值后再拆分。
+        final epCtx = ctx.child({'item': rec, 'index': 0, 'total': 1});
+        var rawPlay = '';
+        var rawNames = '';
+        try {
+          rawPlay = await PExpr.evalString(epSpec.from ?? '', epCtx);
+          if ((epSpec.lineNames ?? '').trim().isNotEmpty) {
+            rawNames = await PExpr.evalString(epSpec.lineNames!, epCtx);
+          }
+        } catch (e) {
+          debugPrint('split 剧集表达式失败：$e');
+        }
+        final episodes = splitEpisodes(
+          rawPlay,
+          lineNames: rawNames,
+          lineSep: epSpec.lineSep,
+          itemSep: epSpec.itemSep,
+          pairSep: epSpec.pairSep,
+        );
+        lines.addAll(linesFromRecords(
+          episodes,
+          baseUrl: resp.finalUrl,
+          defaultLineName: '默认线路',
+        ));
+      } else {
+        final eps = await DeclarativeParser().records(
+          spec: epSpec,
+          body: resp.body,
+          url: resp.finalUrl,
+          base: ctx,
+        );
+        lines.addAll(linesFromRecords(
+          eps.value,
+          baseUrl: resp.finalUrl,
+          defaultLineName: '默认线路',
+        ));
+      }
     } else if (rec['episodes'] is List) {
       final raw = rec['episodes'] as List;
       final eps = <Map<String, Object?>>[];
@@ -430,27 +555,69 @@ class HttpSiteRunner implements SiteRunner {
       return PlaySource(url: episodeUrl, headers: {...plugin.headers, ...?headers});
     }
     final ctx = await _context(id: episodeUrl);
-    final resp = await _send(ep, ctx, extraQuery: {'url': episodeUrl});
-    if (!resp.ok) {
-      throw PqHttpException('HTTP ${resp.statusCode}', statusCode: resp.statusCode, url: resp.finalUrl);
+
+    // 约定：play.request.path 为空表示"不需要再请求"，
+    // 直接对空响应体求值 parse.fields（常见于剧集地址即播放地址的 CMS）。
+    final skipRequest = ep.request.path.trim().isEmpty;
+    PqHttpResponse? resp;
+    if (!skipRequest) {
+      resp = await _send(ep, ctx, extraQuery: {'url': episodeUrl});
+      if (!resp.ok) {
+        throw PqHttpException('HTTP ${resp.statusCode}', statusCode: resp.statusCode, url: resp.finalUrl);
+      }
     }
+    if (plugin.engine == PluginEngine.js) {
+      final raw = _callJsPlay(ep, ctx, resp, episodeUrl);
+      var playUrl = JsNormalizer.playUrl(raw, fallback: episodeUrl).trim();
+      if (playUrl.isEmpty) playUrl = episodeUrl;
+      if (!playUrl.startsWith('http') && !playUrl.startsWith('rtmp')) {
+        playUrl = resolveUrl(playUrl, episodeUrl);
+      }
+      return PlaySource(
+        url: playUrl,
+        headers: {...plugin.headers, ...?headers},
+        kind: _kindOf(playUrl),
+      );
+    }
+
     final parse = ep.parse;
     if (parse == null) return PlaySource(url: episodeUrl);
 
+    if (skipRequest) {
+      // 无请求模式：只对 parse.fields 求值，典型写法是 `"url": "{{id}}"`。
+      final field = parse.fields['url'];
+      var playUrl = '';
+      if (field != null) {
+        playUrl = field.contains('{{')
+            ? await renderTemplate(field, ctx)
+            : PExpr.toStr(await PExpr.eval(field, ctx));
+        playUrl = playUrl.trim();
+      }
+      if (playUrl.isEmpty) playUrl = episodeUrl;
+      if (!playUrl.startsWith('http') && !playUrl.startsWith('rtmp')) {
+        playUrl = resolveUrl(playUrl, episodeUrl);
+      }
+      return PlaySource(
+        url: playUrl,
+        headers: {...plugin.headers, ...?headers},
+        kind: _kindOf(playUrl),
+      );
+    }
+
     final parsed = await DeclarativeParser().records(
       spec: parse,
-      body: resp.body,
-      url: resp.finalUrl,
+      body: resp?.body ?? '',
+      url: resp?.finalUrl ?? episodeUrl,
       base: ctx,
     );
     if (parsed.value.isEmpty) {
-      throw PluginParseException('播放地址解析为空', resp.finalUrl);
+      throw PluginParseException('播放地址解析为空', resp?.finalUrl ?? episodeUrl);
     }
     final rec = parsed.value.first;
     var playUrl = PExpr.toStr(rec['url']).trim();
     if (playUrl.isEmpty) playUrl = episodeUrl;
     if (!playUrl.startsWith('http') && !playUrl.startsWith('rtmp')) {
-      playUrl = resolveUrl(playUrl, resp.finalUrl);
+      playUrl = resolveUrl(playUrl, resp?.finalUrl ?? episodeUrl);
     }
     final headerMap = <String, String>{...plugin.headers};
     if (rec['headers'] is Map) {
@@ -481,7 +648,10 @@ SiteRunner runnerFor({
   switch (plugin.engine) {
     case PluginEngine.demo:
       return DemoRunner(plugin: plugin, site: site);
+    // JS 引擎复用 HTTP 引擎的请求管线（模板渲染、headers、vars、超时、trace），
+    // 只在"响应 → 标准结构"这一步换成脚本求值，所以是同一个 runner。
     case PluginEngine.http:
+    case PluginEngine.js:
       return HttpSiteRunner(
         plugin: plugin,
         site: site,

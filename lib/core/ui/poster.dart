@@ -23,10 +23,37 @@ class PosterPalette {
     [Color(0xFF38202C), Color(0xFF150A10), Color(0xFFEFC9D9)],
   ];
 
-  factory PosterPalette.fromSeed(String seed) {
+  /// 缺图海报的配色：优先从当前 [ColorScheme] 的容器色里取，
+  /// 这样亮暗主题下都能和界面同源；没有 scheme 时退回内置的暗色组。
+  factory PosterPalette.fromSeed(String seed, [ColorScheme? scheme]) {
     var h = 0;
     for (final c in seed.codeUnits) {
       h = (h * 31 + c) & 0x7fffffff;
+    }
+    if (scheme != null) {
+      final variants = <PosterPalette>[
+        PosterPalette(
+          scheme.primaryContainer,
+          scheme.surfaceContainerHighest,
+          scheme.onPrimaryContainer,
+        ),
+        PosterPalette(
+          scheme.tertiaryContainer,
+          scheme.surfaceContainerHighest,
+          scheme.onTertiaryContainer,
+        ),
+        PosterPalette(
+          scheme.secondaryContainer,
+          scheme.surfaceContainerHigh,
+          scheme.onSecondaryContainer,
+        ),
+        PosterPalette(
+          scheme.surfaceContainerHigh,
+          scheme.surfaceContainerHighest,
+          scheme.onSurfaceVariant,
+        ),
+      ];
+      return variants[h % variants.length];
     }
     final set = _sets[h % _sets.length];
     return PosterPalette(set[0], set[1], set[2]);
@@ -57,7 +84,7 @@ class PosterArt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pal = PosterPalette.fromSeed(seed ?? title);
+    final pal = PosterPalette.fromSeed(seed ?? title, Theme.of(context).colorScheme);
     final glyph = title.trim().isEmpty ? '·' : title.trim().characters.first;
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
@@ -85,7 +112,6 @@ class PosterArt extends StatelessWidget {
                     child: Text(
                       glyph,
                       style: TextStyle(
-                        fontFamily: 'Bricolage',
                         fontSize: h * glyphSize,
                         height: 1,
                         fontWeight: FontWeight.w700,
@@ -314,7 +340,6 @@ class PqMonogram extends StatelessWidget {
       child: Text(
         text.isEmpty ? '·' : text.characters.first.toUpperCase(),
         style: TextStyle(
-          fontFamily: 'Bricolage',
           fontSize: size * 0.42,
           height: 1,
           fontWeight: FontWeight.w700,

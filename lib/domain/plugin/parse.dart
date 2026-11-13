@@ -119,6 +119,9 @@ class DeclarativeParser {
           out.add(rec);
         }
         return ParseResult(out, warnings: warnings);
+
+      case ParseFormat.split:
+        throw PluginParseException('split 只用于 episodes，不能解析列表响应', url);
     }
   }
 
@@ -187,6 +190,60 @@ class DeclarativeParser {
   }
 
   static String _short(String s) => s.length > 120 ? '${s.substring(0, 120)}…' : s;
+}
+
+/// 把苹果CMS 风格的剧集串拆成记录：
+/// `线路甲$https://a/1.m3u8#线路乙$https://a/2.m3u8$$$线路丙$https://b/1.m3u8`
+///
+/// [lineNames] 为 `$$$` 分隔的线路名；缺省时按"线路1/线路2…"编号。
+/// 片段没有 [pairSep] 时整段视为地址，集名自动编号。
+List<Map<String, Object?>> splitEpisodes(
+  String raw, {
+  String lineNames = '',
+  String lineSep = r'$$$',
+  String itemSep = '#',
+  String pairSep = r'$',
+}) {
+  final out = <Map<String, Object?>>[];
+  final text = raw.trim();
+  if (text.isEmpty) return out;
+
+  final lsep = lineSep.isEmpty ? r'$$$' : lineSep;
+  final isep = itemSep.isEmpty ? '#' : itemSep;
+  final psep = pairSep.isEmpty ? r'$' : pairSep;
+
+  final groups = text.split(lsep);
+  final names = lineNames.trim().isEmpty ? const <String>[] : lineNames.split(lsep);
+
+  for (var gi = 0; gi < groups.length; gi++) {
+    final group = groups[gi].trim();
+    if (group.isEmpty) continue;
+    final explicitName = gi < names.length ? names[gi].trim() : '';
+    final line = explicitName.isEmpty ? '线路${gi + 1}' : explicitName;
+
+    var seq = 0;
+    for (final piece in group.split(isep)) {
+      final frag = piece.trim();
+      if (frag.isEmpty) continue;
+
+      String name;
+      String url;
+      final at = frag.indexOf(psep);
+      if (at >= 0) {
+        name = frag.substring(0, at).trim();
+        url = frag.substring(at + psep.length).trim();
+      } else {
+        name = '';
+        url = frag;
+      }
+      if (url.isEmpty) continue;
+
+      seq++;
+      if (name.isEmpty) name = '第 $seq 集';
+      out.add({'name': name, 'url': url, 'line': line});
+    }
+  }
+  return out;
 }
 
 class PluginParseException implements Exception {

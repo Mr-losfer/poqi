@@ -4,14 +4,18 @@ import '../design/pq_theme.dart';
 
 enum PqFormFactor { compact, medium, expanded }
 
-/// 响应式断点：手机 < 700，平板 700–1180，桌面 > 1180。
+/// 响应式断点：对齐 Material 3 的 window size class。
+///
+/// - compact  < 600   手机竖屏 / 小窗
+/// - medium   600–840 平板竖屏、折叠屏展开
+/// - expanded ≥ 840   平板横屏、桌面
 class PqAdaptive {
   const PqAdaptive._();
 
   static PqFormFactor of(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
-    if (w < 700) return PqFormFactor.compact;
-    if (w < 1180) return PqFormFactor.medium;
+    if (w < 600) return PqFormFactor.compact;
+    if (w < 840) return PqFormFactor.medium;
     return PqFormFactor.expanded;
   }
 
@@ -20,13 +24,13 @@ class PqAdaptive {
   static bool isExpanded(BuildContext context) =>
       of(context) == PqFormFactor.expanded;
 
-  /// 主内容两侧留白随屏宽增长。
+  /// 主内容两侧留白：8dp 网格上的 16 / 24 / 32。
   static double gutter(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
-    if (w < 480) return 16;
-    if (w < 700) return 20;
-    if (w < 1180) return 32;
-    return 48;
+    if (w < 600) return 16;
+    if (w < 840) return 24;
+    if (w < 1240) return 24;
+    return 32;
   }
 
   /// 宫格列数：按可用宽度与目标卡片宽度拟合。
@@ -65,7 +69,10 @@ class PqContent extends StatelessWidget {
   }
 }
 
-/// 页面根背景：极轻的径向光晕，避免大面积纯色平板感。
+/// 页面根背景。
+///
+/// Material 3 的层级靠 surface 容器色与高度建立，不靠背景光晕，
+/// 因此这里只铺一层纯 surface；`glow` 参数保留仅为兼容旧调用点。
 class PqBackdrop extends StatelessWidget {
   const PqBackdrop({super.key, required this.child, this.glow = true});
 
@@ -74,35 +81,9 @@ class PqBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(color: p.canvas),
-      child: Stack(
-        children: [
-          if (glow)
-            Positioned(
-              top: -220,
-              left: -120,
-              right: -120,
-              height: 520,
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: const Alignment(0.1, -0.6),
-                      radius: 0.9,
-                      colors: [
-                        p.accent.withOpacity(p.isDark ? 0.10 : 0.09),
-                        p.canvas.withOpacity(0),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          child,
-        ],
-      ),
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: child,
     );
   }
 }

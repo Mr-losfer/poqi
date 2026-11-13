@@ -8,13 +8,14 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
 import '../../domain/models/plugin.dart';
+import '../../domain/models/site.dart';
 import '../../domain/plugin/validator.dart';
 import '../backend.dart';
 
 const _cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id, X-Poqi-Pin',
+  'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id',
 };
 
 Response _json(Object? data, {int status = 200}) => Response(
@@ -28,11 +29,16 @@ Response _json(Object? data, {int status = 200}) => Response(
 /// 让任意 MCP 客户端（Claude Desktop / IDE / 自研 Agent）直接读写 Poqi 的
 /// 插件、站点与媒体库，实现"用自然语言写插件、跑搜索、改代码"。
 class McpServer {
-  McpServer({required this.backend, required this.deviceName, this.pin = ''});
+  McpServer({required this.backend, required this.deviceName, this.onMutated});
 
   final PoqiBackend backend;
   final String deviceName;
-  String pin;
+
+  /// 写入成功后通知宿主刷新界面。
+  ///
+  /// MCP 走的是仓库层，绕过了 Riverpod 的 notifier；不主动通知的话，
+  /// AI 明明写进去了，用户切回插件页仍看到旧列表，会以为写入失败。
+  final void Function()? onMutated;
 
   HttpServer? _server;
 
@@ -65,9 +71,6 @@ class McpServer {
   Middleware get _middleware => (inner) => (request) async {
         if (request.method == 'OPTIONS') {
           return Response.ok('', headers: _cors);
-        }
-        if (pin.isNotEmpty && request.headers['x-poqi-pin'] != pin) {
-          return _json({'error': '配对码不正确'}, status: 401);
         }
         final resp = await inner(request);
         return resp.change(headers: _cors);
@@ -332,6 +335,7 @@ class McpServer {
               manifest,
               message: '${args['message'] ?? 'MCP 写入'}',
             );
+            onMutated?.call();
             return {'saved': true, 'id': manifest.id, 'version': manifest.version};
           },
         ),
@@ -355,6 +359,7 @@ class McpServer {
               patch,
               message: '${args['message'] ?? 'MCP 补丁'}',
             );
+            onMutated?.call();
             return {'applied': true, 'revision': rev.seq, 'added': rev.added, 'removed': rev.removed};
           },
         ),
@@ -398,6 +403,83 @@ class McpServer {
                 'latencyMs': s.latencyMs,
               },
           ],
+        ),
+        _Tool(
+          name: 'poqi_save_site',
+          description: '创建或更新站点绑定。插件提供规则，站点提供地址与凭据；'
+              '同一个插件可以挂多个站点。id 为空表示新建。',
+          schema: {
+            'type': 'object',
+            'properties': {
+              'id': {'type': 'string', 'description': '已有站点 id；留空则新建'},
+              'pluginId': {'type': 'string', 'description': '要绑定的插件 id'},
+              'name': {'type': 'string', 'description': '站点显示名'},
+              'baseUrl': {'type': 'string', 'description': '站点根地址'},
+              'config': {
+                'type': 'object',
+                'description': '该站点按插件 config 声明填写的配置，如 token / cookie',
+              },
+              'enabled': {'type': 'boolean', 'default': true},
+              'notes': {'type': 'string'},
+            },
+            'required': ['pluginId', 'name'],
+          },
+          handler: (args) async {
+            final pluginId = '${args['pluginId'] ?? ''}'.trim();
+            if (pluginId.isEmpty) {
+              return {'saved': false, 'error': 'pluginId 不能为空'};
+            }
+            final plugin = backend.pluginRepo.byId(pluginId);
+            if (plugin == null) {
+              return {
+                'saved': false,
+                'error': '插件 $pluginId 不存在，先用 poqi_save_plugin 创建它',
+              };
+            }
+
+            final existingId = '${args['id'] ?? ''}'.trim();
+            final existing = existingId.isEmpty
+                ? null
+                : backend.sites().where((e) => e.id == existingId).firstOrNull;
+
+            final rawConfig = args['config'];
+            final config = <String, String>{};
+            if (rawConfig is Map) {
+              rawConfig.forEach((k, v) => config['$k'] = '$v');
+            }
+
+            final now = DateTime.now();
+            final site = SiteBinding(
+              id: existing?.id ?? backend.siteRepo.newId(),
+              pluginId: pluginId,
+              name: '${args['name'] ?? ''}'.trim(),
+              baseUrl: '${args['baseUrl'] ?? plugin.baseUrl}'.trim(),
+              enabled: args['enabled'] is bool ? args['enabled'] as bool : true,
+              order: existing?.order ?? backend.sites().length,
+              config: config.isEmpty ? (existing?.config ?? const {}) : config,
+              notes: '${args['notes'] ?? existing?.notes ?? ''}',
+              createdAt: existing?.createdAt ?? now,
+              updatedAt: now,
+            );
+
+            await backend.siteRepo.save(site);
+            onMutated?.call();
+
+            // 顺便告诉调用方还缺哪些必填配置，省掉一次「为什么不出片」的往返。
+            final missing = <String>[];
+            for (final f in plugin.config) {
+              if (f.required && (site.config[f.key] ?? '').trim().isEmpty) {
+                missing.add('${f.key}（${f.label}）');
+              }
+            }
+            return {
+              'saved': true,
+              'id': site.id,
+              'name': site.name,
+              'plugin': plugin.name,
+              'missingConfig': missing,
+            };
+          },
         ),
         _Tool(
           name: 'poqi_search',

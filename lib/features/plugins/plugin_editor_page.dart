@@ -114,6 +114,28 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
     }
   }
 
+  /// JS 插件的脚本单独开一个全屏编辑器。
+  ///
+  /// 直接改 JSON 里的 script 字段要面对 `\n` 转义，几乎不可读；
+  /// 这里把它抽出来当纯文本编辑，保存时再写回 JSON。
+  Future<void> _editScript() async {
+    final decoded = jsonDecode(_code.text);
+    if (decoded is! Map) return;
+    final data = Map<String, dynamic>.from(decoded);
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => _ScriptEditorPage(
+          title: '${data['name'] ?? '插件'} · 脚本',
+          initial: '${data['script'] ?? ''}',
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    data['script'] = result;
+    _code.text = const JsonEncoder.withIndent('  ').convert(data);
+    _validate();
+  }
+
   Future<void> _save() async {
     final manifest = _manifest();
     if (manifest == null) {
@@ -382,6 +404,7 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
               onPatch: _applyPatchDialog,
               onCopyPatch: _copyPatch,
               onValidate: _validate,
+              onEditScript: _manifest()?.engine == PluginEngine.js ? _editScript : null,
               onDelete: () => _delete(plugin),
             ),
             Divider(height: 1, color: p.lineSoft),
@@ -943,6 +966,7 @@ class _Header extends StatelessWidget {
     required this.onPatch,
     required this.onCopyPatch,
     required this.onValidate,
+    this.onEditScript,
     required this.onDelete,
   });
 
@@ -958,6 +982,7 @@ class _Header extends StatelessWidget {
   final VoidCallback onPatch;
   final VoidCallback onCopyPatch;
   final VoidCallback onValidate;
+  final VoidCallback? onEditScript;
   final VoidCallback onDelete;
 
   @override
@@ -1035,6 +1060,12 @@ class _Header extends StatelessWidget {
               tooltip: '复制差量补丁',
               onTap: onCopyPatch,
             ),
+            if (onEditScript != null)
+              PqIconButton(
+                icon: Icons.terminal_rounded,
+                tooltip: '编辑 JS 脚本',
+                onTap: onEditScript!,
+              ),
             PqIconButton(
               icon: Icons.fact_check_outlined,
               tooltip: '重新校验',
@@ -1062,6 +1093,8 @@ class _Header extends StatelessWidget {
                   onCopyPatch();
                 case 'validate':
                   onValidate();
+                case 'script':
+                  onEditScript?.call();
                 case 'delete':
                   onDelete();
               }
@@ -1073,6 +1106,8 @@ class _Header extends StatelessWidget {
                 const PopupMenuItem(value: 'copy', child: Text('复制差量补丁')),
                 const PopupMenuItem(value: 'validate', child: Text('重新校验')),
               ],
+              if (compact && onEditScript != null)
+                const PopupMenuItem(value: 'script', child: Text('编辑 JS 脚本')),
               PopupMenuItem(
                 value: 'delete',
                 child: Text('删除插件', style: TextStyle(color: p.danger, fontSize: 13)),
@@ -1212,6 +1247,112 @@ class _IssueTile extends StatelessWidget {
                       style: PqType.mono.copyWith(fontSize: 10, color: p.textFaint),
                     ),
                   ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 全屏 JS 脚本编辑器。
+///
+/// 只做一件事：把 JSON 里的 script 当纯文本编辑，避免在 JSON 里和 `\n` 搏斗。
+/// 语法高亮留给后续迭代，当前用等宽字体 + 行号即可。
+class _ScriptEditorPage extends StatefulWidget {
+  const _ScriptEditorPage({required this.title, required this.initial});
+
+  final String title;
+  final String initial;
+
+  @override
+  State<_ScriptEditorPage> createState() => _ScriptEditorPageState();
+}
+
+class _ScriptEditorPageState extends State<_ScriptEditorPage> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial);
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final lines = '\n'.allMatches(_controller.text).length + 1;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(_controller.text),
+            child: const Text('保存'),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            color: scheme.surfaceContainerHigh,
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+            child: Text(
+              '可用：ctx.body / ctx.json / ctx.url / ctx.base / ctx.page / '
+              'ctx.keyword / ctx.category / ctx.id / ctx.cfg / ctx.vars\n'
+              '工具：pq.get · pq.css · pq.cssAttr · pq.select · pq.text · pq.attr · '
+              'pq.abs · pq.clean · pq.matchAll · pq.first · pq.num',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+                height: 1.5,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  width: 48,
+                  color: scheme.surfaceContainerLow,
+                  padding: const EdgeInsets.only(top: 12, right: 8),
+                  child: Text(
+                    List.generate(lines, (i) => '${i + 1}').join('\n'),
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontFamily: 'monospace',
+                      height: 1.5,
+                      color: scheme.onSurfaceVariant.withOpacity(0.6),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    scrollController: _scroll,
+                    expands: true,
+                    maxLines: null,
+                    minLines: null,
+                    textAlignVertical: TextAlignVertical.top,
+                    onChanged: (_) => setState(() {}),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontFamily: 'monospace',
+                      height: 1.5,
+                    ),
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.fromLTRB(12, 12, 12, 24),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

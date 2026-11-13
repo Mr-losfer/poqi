@@ -2,13 +2,13 @@
 
 > 把散落的影像，收进一只盒子。
 
-Poqi 是一个可编程的影视聚合器：**插件 = 一套声明式规则，站点 = 插件 + 一份配置**。
-它把任意站点的页面结构翻译成统一的媒体 API，再用一套精致的 Material 3 界面放映出来。
+Poqi 是一个可编程的影视聚合器：**插件 = 一套规则（声明式 JSON 或 JavaScript），站点 = 插件 + 一份配置**。
+它把任意站点的页面结构翻译成统一的媒体 API，再用一套标准的 Material 3 界面放映出来。
 同时内置**局域网 MCP 服务**，让任意 AI 客户端直接读写插件、跑搜索、改代码。
 
-包名 `cn.losfer.Poqi` · 目标平台 Android / Windows / Linux（平板与桌面自适应） · 无需 iOS。
+包名 `cn.losfer.Poqi` · 目标平台 **Android / Windows**（平板与桌面自适应） · 不提供 iOS / Linux 版本。
 
-**[下载最新版 APK](https://github.com/Mr-losfer/poqi/releases/latest)** · Android 7.0+ · 56 MB 通用包（arm64 / armv7 / x86_64）
+**[下载最新版](https://github.com/Mr-losfer/poqi/releases/latest)** · Android 7.0+ · 56 MB 通用 APK（arm64 / armv7 / x86_64） · Windows x64 压缩包
 
 ---
 
@@ -16,16 +16,17 @@ Poqi 是一个可编程的影视聚合器：**插件 = 一套声明式规则，�
 
 | 模块 | 能力 |
 | --- | --- |
-| 首页 | 主视觉轮播、继续观看、按类型分区轨道、跨站聚合去重 |
+| 首页 | 主视觉轮播、站点切换、继续观看、按类型分区轨道、跨站聚合去重 |
 | 分类 | 类型/地区/年份筛选，一站式聚合全部启用站点 |
 | 搜索 | 全站并发搜索，结果边到边显示，逐站点状态可观测 |
 | 详情 | 线路/剧集选择、跨站同名片源、收藏 |
 | 播放 | 自定义控制层、倍速、全屏、播放诊断；失败自动换源 |
-| 插件工坊 | 新建/编辑/复制/删除插件，JSON 编辑器、即时校验、端点试跑、版本历史 |
+| 插件工坊 | 新建/编辑/复制/删除插件，声明式与 JS 双模板、即时校验、端点试跑、版本历史 |
+| JS 插件 | 内嵌 QuickJS，脚本里用 `pq.*` 取 JSON / 解 HTML，复杂站点也能映射成标准结构 |
 | 差量修改 | 自动生成 unified diff，支持复制补丁、粘贴应用、回滚到任意版本 |
 | 站点管理 | 一插件多站点，每个站点独立配置（Cookie/Token/线路…） |
-| 局域网 | UDP 广播发现、配对码校验、插件/站点/收藏/进度双向同步 |
-| MCP | HTTP JSON-RPC 2.0，11 个工具，供 AI 客户端调用 |
+| 局域网 | UDP 广播发现、插件/站点/收藏/进度双向同步；MCP 端点免配对码直接读写 |
+| MCP | HTTP JSON-RPC 2.0，12 个工具（含写插件 / 写站点），供 AI 客户端调用 |
 | 更新 | 从 GitHub Releases 检查版本，gh-proxy 主代理下载，直连兜底 |
 
 ## 快速开始
@@ -33,16 +34,19 @@ Poqi 是一个可编程的影视聚合器：**插件 = 一套声明式规则，�
 ```bash
 flutter pub get
 flutter run -d <device>
-flutter test          # 29 个测试：表达式 / 解析 / 补丁 / 演示引擎 / 端到端冒烟
+flutter test          # 55 个测试：表达式 / 解析 / 补丁 / 插件流转 / 端到端冒烟
+node tool/js_runtime_test.js   # JS 运行时与内置脚本的离线验证（9 组断言）
 ```
 
-构建安装包：
+构建安装包（只支持 Android 与 Windows 两个平台）：
 
 ```bash
-flutter build apk --release           # Android
-flutter build windows --release       # Windows
-flutter build linux --release         # Linux
+flutter build apk --release           # Android 通用包
+flutter build windows --release       # Windows x64（只能在 Windows 上构建）
 ```
+
+Windows 产物位于 `build/windows/x64/runner/Release/`，整个目录一起分发即可运行；
+发布时会被压成 `poqi-<version>-windows-x64.zip`（zip 内置同名顶层目录，解压即用）。
 
 ## 目录结构
 
@@ -125,9 +129,9 @@ Content-Type: application/json
 工具：`poqi_get_state` · `poqi_list_plugins` · `poqi_get_plugin` ·
 `poqi_validate_plugin` · `poqi_save_plugin` · `poqi_apply_patch` ·
 `poqi_list_revisions` · `poqi_list_sites` · `poqi_search` ·
-`poqi_get_detail` · `poqi_export_snapshot`
+`poqi_get_detail` · `poqi_save_site` · `poqi_export_snapshot`
 
-开启配对码后，请求需带 `X-Poqi-Pin` 头。
+MCP 端点不做鉴权：同一局域网内即可读写，省掉配对码这一层摩擦。
 
 ## 更新与发布
 
@@ -138,10 +142,19 @@ Content-Type: application/json
 发布流程（本地）：
 
 ```bash
-./tool/release.sh 1.1.0 "支持弹幕" --push   # 构建 → 写 version.json → 提交 → 打 tag → 推送 → 发 Release
+./tool/release.sh 1.1.0 "支持弹幕"                     # 只构建 APK
+./tool/release.sh 1.1.0 "支持弹幕" --desktop           # 追加 Windows zip（需在 Windows 宿主上执行）
+./tool/release.sh 1.1.0 "支持弹幕" --desktop --push    # 构建 → 写 version.json → 提交 → 打 tag → 推送 → 发 Release
+./tool/release.sh 1.1.0 "支持弹幕" --no-build --push   # 复用已有产物，只做清单与发布
 ```
 
-CI 见 `.github/workflows/android-release.yml`：推送 `v*` tag 自动构建并创建 Release。
+- Linux / macOS 上 `--desktop` 会自动跳过 Windows 包并打印提示，不会让脚本失败；
+  这类机器请只发 APK，Windows 包交给 CI（推送 tag 后由 windows job 产出）。
+- Release 附带的产物：`poqi-<version>.apk`、`poqi-<version>-windows-x64.zip`（CI 必产出）、
+  `SHA256SUMS.txt`、`version.json`；`version.json` 的 `assets` 同时列出 apk 与 zip，各自带 size / sha256。
+
+CI 见 `.github/workflows/release.yml`：推送 `v*` tag 自动构建 Android + Windows 并一次性创建 Release
+（`android` job 跑 `flutter test`，`windows` job 只构建，因 Windows 上测试易因路径差异误报）。
 
 > **签名说明**：`android/app/poqi-release.jks` 与 `android/key.properties` 故意纳入版本库，
 > 以保证本地构建与 CI 产出的 APK 使用同一签名 —— 否则换构建环境后，用户无法覆盖安装更新。

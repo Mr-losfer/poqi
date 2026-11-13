@@ -1,43 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Poqi 设计令牌。
+/// Poqi 设计令牌 —— **Material 3 标准体系**。
 ///
-/// 视觉概念：**午夜放映厅**。墨黑为底、暖琥珀为光，
-/// 用 0.5px 细描边替代投影来构造层次，避免"卡片+阴影"的通用感。
+/// 主题由 `ColorScheme.fromSeed` 生成，配色、层级、形状全部走 Material 3
+/// 的 tonal palette 与 shape scale；不再自定义品牌色与投影规则。
+/// 这里只保留两样东西：
+///   1. 8dp 网格常量（间距节奏）
+///   2. 一层语义别名 [PqPalette]，把 ColorScheme 的角色翻译成业务可读的名字，
+///      避免每个页面都写 `Theme.of(context).colorScheme.onSurfaceVariant`。
 class PqTokens {
   const PqTokens._();
 
-  // ---------- 暗色（默认） ----------
-  static const canvas = Color(0xFF08090B);
-  static const surface = Color(0xFF0F1216);
-  static const surfaceHigh = Color(0xFF161A1F);
-  static const surfaceHigher = Color(0xFF1D232A);
-  static const line = Color(0xFF272F36);
-  static const lineSoft = Color(0xFF1A2027);
-  static const text = Color(0xFFF3F0E8);
-  static const textMuted = Color(0xFF9DA7A5);
-  static const textFaint = Color(0xFF6A7472);
-
-  static const amber = Color(0xFFE8B564);
-  static const amberDeep = Color(0xFFB4791F);
-  static const sage = Color(0xFF92B8A5);
-  static const clay = Color(0xFFD98B6F);
-  static const danger = Color(0xFFE0736B);
-
-  // ---------- 亮色 ----------
-  static const lightCanvas = Color(0xFFF7F4ED);
-  static const lightSurface = Color(0xFFFFFEFA);
-  static const lightSurfaceHigh = Color(0xFFF0ECE2);
-  static const lightSurfaceHigher = Color(0xFFE8E2D6);
-  static const lightLine = Color(0xFFE0DACD);
-  static const lightLineSoft = Color(0xFFECE7DC);
-  static const lightText = Color(0xFF15191B);
-  static const lightTextMuted = Color(0xFF5B6462);
-  static const lightTextFaint = Color(0xFF8A918E);
-  static const lightAmber = Color(0xFFA2631A);
-
-  // ---------- 尺度 ----------
+  /// Material 3 形状尺度：extra-small / small / medium / large / extra-large。
   static const double r4 = 4;
   static const double r8 = 8;
   static const double r12 = 12;
@@ -45,11 +20,20 @@ class PqTokens {
   static const double r20 = 20;
   static const double r28 = 28;
 
-  static const double gutter = 20;
+  /// 8dp 网格：页面边距 16、区块间距 24、大区块 32。
+  static const double gutter = 16;
   static const double maxContent = 1440;
+
+  /// 断点，与 Material 3 window size class 对齐。
+  static const double compactMax = 600;
+  static const double mediumMax = 840;
 }
 
-/// 随明暗切换的语义色板，通过 ThemeExtension 下发。
+/// 语义色板：不是新的配色系统，只是 [ColorScheme] 的业务别名。
+///
+/// 每个字段都直接来自 Material 3 的角色（surface / surfaceContainer /
+/// onSurfaceVariant / outlineVariant / primary …），因此亮暗切换、
+/// 动态取色都会自动跟随，页面里不需要判断明暗。
 @immutable
 class PqPalette extends ThemeExtension<PqPalette> {
   const PqPalette({
@@ -70,65 +54,86 @@ class PqPalette extends ThemeExtension<PqPalette> {
     required this.isDark,
   });
 
+  /// 页面底色 → `surface`
   final Color canvas;
+
+  /// 一级容器 → `surfaceContainerLow`
   final Color surface;
+
+  /// 二级容器（输入框、hover）→ `surfaceContainerHigh`
   final Color surfaceHigh;
+
+  /// 三级容器（选中态、tooltip）→ `surfaceContainerHighest`
   final Color surfaceHigher;
+
+  /// 分隔线与描边 → `outlineVariant`
   final Color line;
+
+  /// 更轻的描边 → `outlineVariant` 降透明度
   final Color lineSoft;
+
+  /// 主文字 → `onSurface`
   final Color text;
+
+  /// 次要文字 → `onSurfaceVariant`
   final Color textMuted;
+
+  /// 极弱文字（占位、计数）→ `onSurfaceVariant` 降透明度
   final Color textFaint;
+
+  /// 强调色 → `primary`
   final Color accent;
+
+  /// 强调色上的文字 → `onPrimary`
   final Color onAccent;
+
+  /// 辅助强调 → `tertiary`
   final Color sage;
+
+  /// 次强调 → `secondary`
   final Color clay;
+
+  /// 错误 → `error`
   final Color danger;
+
   final bool isDark;
 
-  static const dark = PqPalette(
-    canvas: PqTokens.canvas,
-    surface: PqTokens.surface,
-    surfaceHigh: PqTokens.surfaceHigh,
-    surfaceHigher: PqTokens.surfaceHigher,
-    line: PqTokens.line,
-    lineSoft: PqTokens.lineSoft,
-    text: PqTokens.text,
-    textMuted: PqTokens.textMuted,
-    textFaint: PqTokens.textFaint,
-    accent: PqTokens.amber,
-    onAccent: Color(0xFF231804),
-    sage: PqTokens.sage,
-    clay: PqTokens.clay,
-    danger: PqTokens.danger,
-    isDark: true,
-  );
+  /// 从 Material 3 色彩方案派生，不做任何额外加工。
+  factory PqPalette.fromScheme(ColorScheme s) => PqPalette(
+        canvas: s.surface,
+        surface: s.surfaceContainerLow,
+        surfaceHigh: s.surfaceContainerHigh,
+        surfaceHigher: s.surfaceContainerHighest,
+        line: s.outlineVariant,
+        lineSoft: s.outlineVariant.withOpacity(0.55),
+        text: s.onSurface,
+        textMuted: s.onSurfaceVariant,
+        textFaint: s.onSurfaceVariant.withOpacity(0.72),
+        accent: s.primary,
+        onAccent: s.onPrimary,
+        sage: s.tertiary,
+        clay: s.secondary,
+        danger: s.error,
+        isDark: s.brightness == Brightness.dark,
+      );
 
-  static const light = PqPalette(
-    canvas: PqTokens.lightCanvas,
-    surface: PqTokens.lightSurface,
-    surfaceHigh: PqTokens.lightSurfaceHigh,
-    surfaceHigher: PqTokens.lightSurfaceHigher,
-    line: PqTokens.lightLine,
-    lineSoft: PqTokens.lightLineSoft,
-    text: PqTokens.lightText,
-    textMuted: PqTokens.lightTextMuted,
-    textFaint: PqTokens.lightTextFaint,
-    accent: PqTokens.lightAmber,
-    onAccent: Color(0xFFFFFBF2),
-    sage: Color(0xFF3F6B58),
-    clay: Color(0xFF9C5334),
-    danger: Color(0xFFB4453D),
-    isDark: false,
-  );
-
-  static PqPalette of(BuildContext context) =>
-      Theme.of(context).extension<PqPalette>() ?? dark;
+  static PqPalette of(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.extension<PqPalette>() ?? PqPalette.fromScheme(theme.colorScheme);
+  }
 
   @override
-  PqPalette copyWith({Color? accent, Color? text, bool? isDark}) => PqPalette(
-        canvas: canvas,
-        surface: surface,
+  PqPalette copyWith({
+    Color? accent,
+    Color? onAccent,
+    Color? text,
+    Color? canvas,
+    Color? surface,
+    bool? isDark,
+  }) =>
+      PqPalette(
+        canvas: canvas ?? this.canvas,
+        surface: surface ?? this.surface,
         surfaceHigh: surfaceHigh,
         surfaceHigher: surfaceHigher,
         line: line,
@@ -137,7 +142,7 @@ class PqPalette extends ThemeExtension<PqPalette> {
         textMuted: textMuted,
         textFaint: textFaint,
         accent: accent ?? this.accent,
-        onAccent: onAccent,
+        onAccent: onAccent ?? this.onAccent,
         sage: sage,
         clay: clay,
         danger: danger,
@@ -167,271 +172,137 @@ class PqPalette extends ThemeExtension<PqPalette> {
   }
 }
 
-/// 排版：展示级用 Bricolage（拉丁/数字），中文回落到系统字重层次。
+/// 排版：严格对齐 Material 3 type scale（2021）。
+///
+/// 字号/行高/字重都取自规范，字体交给主题默认的 Roboto（中文自动回落系统字体），
+/// 不再引入第三方展示字体。
 class PqType {
   const PqType._();
 
-  static const String display = 'Bricolage';
-
+  /// 品牌字：22 / 28，对应 titleLarge 的度量。
   static const TextStyle brand = TextStyle(
-    fontFamily: display,
     fontSize: 22,
-    height: 1.0,
+    height: 1.27,
     fontWeight: FontWeight.w700,
-    letterSpacing: -0.6,
+    letterSpacing: 0,
   );
 
+  /// 主视觉标题：32 / 40，对应 headlineLarge。
   static const TextStyle hero = TextStyle(
-    fontFamily: display,
-    fontSize: 40,
-    height: 1.02,
+    fontSize: 32,
+    height: 1.25,
     fontWeight: FontWeight.w700,
-    letterSpacing: -1.2,
+    letterSpacing: 0,
   );
 
+  /// 页面标题：24 / 32，对应 headlineSmall。
   static const TextStyle h1 = TextStyle(
     fontSize: 24,
-    height: 1.2,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.4,
+    height: 1.33,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0,
   );
 
+  /// 区块标题：22 / 28，对应 titleLarge。
   static const TextStyle h2 = TextStyle(
-    fontSize: 18,
-    height: 1.25,
+    fontSize: 22,
+    height: 1.27,
     fontWeight: FontWeight.w600,
-    letterSpacing: -0.2,
+    letterSpacing: 0,
   );
 
+  /// 卡片标题：16 / 24，对应 titleMedium。
   static const TextStyle title = TextStyle(
-    fontSize: 15,
-    height: 1.3,
-    fontWeight: FontWeight.w600,
+    fontSize: 16,
+    height: 1.5,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.15,
   );
 
+  /// 正文：14 / 20，对应 bodyMedium。
   static const TextStyle body = TextStyle(
     fontSize: 14,
-    height: 1.55,
+    height: 1.43,
     fontWeight: FontWeight.w400,
+    letterSpacing: 0.25,
   );
 
+  /// 辅助正文：12 / 16，对应 bodySmall。
   static const TextStyle bodySmall = TextStyle(
-    fontSize: 12.5,
-    height: 1.45,
-    fontWeight: FontWeight.w400,
-  );
-
-  static const TextStyle label = TextStyle(
     fontSize: 12,
-    height: 1.2,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.2,
+    height: 1.33,
+    fontWeight: FontWeight.w400,
+    letterSpacing: 0.4,
   );
 
+  /// 标签/按钮：14 / 20，对应 labelLarge。
+  static const TextStyle label = TextStyle(
+    fontSize: 14,
+    height: 1.43,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.1,
+  );
+
+  /// 等宽：代码与 JSON 预览。
   static const TextStyle mono = TextStyle(
     fontFamily: 'monospace',
-    fontFamilyFallback: ['Menlo', 'Consolas', 'Courier New'],
+    fontFamilyFallback: ['Roboto Mono', 'Menlo', 'Consolas', 'Courier New'],
     fontSize: 12.5,
     height: 1.6,
     fontWeight: FontWeight.w400,
   );
 
-  /// 小号全大写标签，用于分区标识（如 "CONTINUE"）。
+  /// 分区小标签：11 / 16，对应 labelSmall。
   static const TextStyle eyebrow = TextStyle(
-    fontFamily: display,
-    fontSize: 10.5,
-    height: 1.2,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 1.6,
+    fontSize: 11,
+    height: 1.45,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.5,
   );
 }
 
+/// 主题构建：先取 Material 3 默认值，再只覆盖"必须覆盖"的几项。
+///
+/// 刻意保持克制——组件的形状、高度、动效都走 Flutter 的 Material 3 默认实现，
+/// 这样才是"标准格式"，而不是把 Material 组件重新化妆一遍。
 class PqTheme {
   const PqTheme._();
 
-  static ThemeData build({required bool dark}) {
-    final p = dark ? PqPalette.dark : PqPalette.light;
-    final scheme = ColorScheme(
-      brightness: dark ? Brightness.dark : Brightness.light,
-      primary: p.accent,
-      onPrimary: p.onAccent,
-      secondary: p.sage,
-      onSecondary: dark ? const Color(0xFF0A1512) : Colors.white,
-      tertiary: p.clay,
-      onTertiary: dark ? const Color(0xFF1A0C07) : Colors.white,
-      error: p.danger,
-      onError: dark ? const Color(0xFF1A0908) : Colors.white,
-      surface: p.surface,
-      onSurface: p.text,
-      surfaceContainerHighest: p.surfaceHigher,
-      outline: p.line,
-      outlineVariant: p.lineSoft,
-    );
+  /// Material 3 基线种子色（Flutter `ColorScheme.fromSeed` 的默认值）。
+  static const Color seed = Color(0xFF6750A4);
 
-    final base = ThemeData(
-      useMaterial3: true,
-      brightness: dark ? Brightness.dark : Brightness.light,
-      colorScheme: scheme,
-      scaffoldBackgroundColor: p.canvas,
-      canvasColor: p.canvas,
-      splashFactory: InkSparkle.splashFactory,
-      visualDensity: VisualDensity.standard,
-      fontFamilyFallback: const ['Noto Sans CJK SC', 'Source Han Sans SC', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
-    );
+  static ThemeData build({required bool dark}) {
+    final brightness = dark ? Brightness.dark : Brightness.light;
+    final scheme = ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
+    final base = ThemeData(useMaterial3: true, colorScheme: scheme);
 
     return base.copyWith(
-      textTheme: base.textTheme
-          .apply(bodyColor: p.text, displayColor: p.text)
-          .copyWith(
-            displayLarge: PqType.hero.copyWith(color: p.text),
-            headlineMedium: PqType.h1.copyWith(color: p.text),
-            titleLarge: PqType.h2.copyWith(color: p.text),
-            titleMedium: PqType.title.copyWith(color: p.text),
-            bodyMedium: PqType.body.copyWith(color: p.text),
-            bodySmall: PqType.bodySmall.copyWith(color: p.textMuted),
-            labelLarge: PqType.label.copyWith(color: p.text),
-          ),
-      extensions: [p],
-      dividerTheme: DividerThemeData(color: p.lineSoft, thickness: 1, space: 1),
-      iconTheme: IconThemeData(color: p.textMuted, size: 20),
+      // 中文回落链：Roboto → 系统中文字体
+      textTheme: base.textTheme.apply(
+        fontFamilyFallback: const [
+          'Noto Sans CJK SC',
+          'Noto Sans SC',
+          'Source Han Sans SC',
+          'PingFang SC',
+          'Microsoft YaHei',
+        ],
+      ),
+      extensions: [PqPalette.fromScheme(scheme)],
+
+      // 卡片默认无外边距：布局由页面控制间距，避免出现"双份 padding"。
+      cardTheme: const CardTheme(margin: EdgeInsets.zero),
+
+      // 状态栏图标跟随明暗
       appBarTheme: AppBarTheme(
-        backgroundColor: p.canvas,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        centerTitle: false,
-        titleTextStyle: PqType.title.copyWith(color: p.text, fontSize: 16),
-        systemOverlayStyle: dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+        systemOverlayStyle:
+            dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       ),
-      cardTheme: CardTheme(
-        color: p.surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(PqTokens.r16),
-          side: BorderSide(color: p.lineSoft),
-        ),
-      ),
-      dialogTheme: DialogTheme(
-        backgroundColor: p.surfaceHigh,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(PqTokens.r20),
-          side: BorderSide(color: p.line),
-        ),
-      ),
-      bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: p.surfaceHigh,
-        surfaceTintColor: Colors.transparent,
-        modalBackgroundColor: p.surfaceHigh,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: p.surfaceHigh,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        hintStyle: PqType.body.copyWith(color: p.textFaint),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(PqTokens.r12),
-          borderSide: BorderSide(color: p.lineSoft),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(PqTokens.r12),
-          borderSide: BorderSide(color: p.lineSoft),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(PqTokens.r12),
-          borderSide: BorderSide(color: p.accent.withOpacity(0.9), width: 1.4),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(PqTokens.r12),
-          borderSide: BorderSide(color: p.danger),
-        ),
-      ),
-      chipTheme: ChipThemeData(
-        backgroundColor: p.surfaceHigh,
-        selectedColor: p.accent,
-        side: BorderSide(color: p.lineSoft),
-        labelStyle: PqType.label.copyWith(color: p.textMuted),
-        secondaryLabelStyle: PqType.label.copyWith(color: p.onAccent),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          backgroundColor: p.accent,
-          foregroundColor: p.onAccent,
-          elevation: 0,
-          textStyle: PqType.label.copyWith(fontSize: 13, fontWeight: FontWeight.w700),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(PqTokens.r12)),
-        ),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: p.text,
-          textStyle: PqType.label.copyWith(fontSize: 13),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(PqTokens.r8)),
-        ),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: p.text,
-          side: BorderSide(color: p.line),
-          textStyle: PqType.label.copyWith(fontSize: 13),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(PqTokens.r12)),
-        ),
-      ),
-      snackBarTheme: SnackBarThemeData(
-        backgroundColor: p.surfaceHigher,
-        contentTextStyle: PqType.bodySmall.copyWith(color: p.text),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(PqTokens.r12)),
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: p.surface,
-        surfaceTintColor: Colors.transparent,
-        indicatorColor: p.accent.withOpacity(0.16),
-        height: 64,
-        elevation: 0,
-        labelTextStyle: WidgetStateProperty.resolveWith(
-          (s) => PqType.eyebrow.copyWith(
-            fontSize: 10,
-            letterSpacing: 0.8,
-            color: s.contains(WidgetState.selected) ? p.accent : p.textFaint,
-          ),
-        ),
-        iconTheme: WidgetStateProperty.resolveWith(
-          (s) => IconThemeData(
-            size: 21,
-            color: s.contains(WidgetState.selected) ? p.accent : p.textMuted,
-          ),
-        ),
-      ),
-      progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: p.accent,
-        linearTrackColor: p.surfaceHigher,
-        circularTrackColor: p.surfaceHigher,
-      ),
-      tooltipTheme: TooltipThemeData(
-        decoration: BoxDecoration(
-          color: p.surfaceHigher,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: p.line),
-        ),
-        textStyle: PqType.bodySmall.copyWith(color: p.text, fontSize: 11.5),
-        waitDuration: const Duration(milliseconds: 420),
-      ),
+
+      // 桌面端滚动条细化，移动端不受影响
       scrollbarTheme: ScrollbarThemeData(
-        thumbColor: WidgetStatePropertyAll(p.textFaint.withOpacity(0.35)),
         thickness: const WidgetStatePropertyAll(6),
         radius: const Radius.circular(3),
+        thumbColor: WidgetStatePropertyAll(scheme.onSurfaceVariant.withOpacity(0.4)),
       ),
     );
   }

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/design/pq_theme.dart';
 import '../../core/ui/adaptive.dart';
 import '../../core/ui/motion.dart';
 import '../../core/ui/primitives.dart';
@@ -142,58 +141,57 @@ class _DiscoverBodyState extends ConsumerState<_DiscoverBody> {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
     final compact = PqAdaptive.isCompact(context);
-    final top = compact ? MediaQuery.paddingOf(context).top + 10 : 18.0;
 
     return PqBackdrop(
-      child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverToBoxAdapter(
-            child: PqContent(
+      child: SafeArea(
+        bottom: false,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.only(top: top),
-                child: PqPageHeader(
-                  eyebrow: 'LIBRARY',
-                  title: '分类',
-                  subtitle: '跨站点浏览，一处筛选，全部源生效',
-                  actions: [
-                    PqIconButton(
-                      icon: Icons.refresh_rounded,
-                      tooltip: '重新聚合',
-                      onTap: _loading ? null : _load,
-                    ),
-                  ],
+                padding: EdgeInsets.only(top: compact ? 16 : 24),
+                child: PqContent(
+                  child: PqPageHeader(
+                    title: '分类',
+                    subtitle: '跨站点浏览，一处筛选，全部源生效',
+                    actions: [
+                      IconButton(
+                        tooltip: '重新聚合',
+                        onPressed: _loading ? null : _load,
+                        icon: const Icon(Icons.refresh),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          SliverToBoxAdapter(
-            child: PqContent(child: _filterBar(context, p, compact)),
-          ),
-          SliverToBoxAdapter(
-            child: PqContent(
-              child: PqAnimatedSwap(
-                child: KeyedSubtree(
-                  key: ValueKey(_phase),
-                  child: _phaseView(context, p),
+            SliverToBoxAdapter(child: PqContent(child: _filterBar(compact))),
+            SliverToBoxAdapter(
+              child: PqContent(
+                child: PqAnimatedSwap(
+                  child: KeyedSubtree(
+                    key: ValueKey(_phase),
+                    child: _phaseView(context),
+                  ),
                 ),
               ),
             ),
-          ),
-          SliverToBoxAdapter(child: PqContent(child: _footer(p))),
-          SliverToBoxAdapter(
-            child: SizedBox(height: 40 + MediaQuery.paddingOf(context).bottom),
-          ),
-        ],
+            SliverToBoxAdapter(child: PqContent(child: _footer(context))),
+            SliverToBoxAdapter(
+              child: SizedBox(height: 24 + MediaQuery.paddingOf(context).bottom),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _filterBar(BuildContext context, PqPalette p, bool compact) {
+  Widget _filterBar(bool compact) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 22),
+      padding: const EdgeInsets.only(bottom: 16),
       child: Row(
         children: [
           Expanded(
@@ -211,7 +209,9 @@ class _DiscoverBodyState extends ConsumerState<_DiscoverBody> {
             const SizedBox(width: 16),
             Text(
               _loading ? '聚合中' : '${_items.length} 部',
-              style: PqType.eyebrow.copyWith(color: p.textFaint, letterSpacing: 1.2),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ],
@@ -219,7 +219,7 @@ class _DiscoverBodyState extends ConsumerState<_DiscoverBody> {
     );
   }
 
-  Widget _phaseView(BuildContext context, PqPalette p) {
+  Widget _phaseView(BuildContext context) {
     if (_loading) {
       return LayoutBuilder(
         builder: (context, c) {
@@ -256,28 +256,33 @@ class _DiscoverBodyState extends ConsumerState<_DiscoverBody> {
     );
   }
 
-  Widget _footer(PqPalette p) {
+  Widget _footer(BuildContext context) {
+    final theme = Theme.of(context);
     if (_loading || _items.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.only(top: 30),
+      padding: const EdgeInsets.only(top: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Divider(color: p.lineSoft, height: 1),
-          const SizedBox(height: 14),
+          const Divider(),
+          const SizedBox(height: 12),
           Wrap(
-            spacing: 14,
-            runSpacing: 6,
+            spacing: 12,
+            runSpacing: 4,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
                 '共 ${_items.length} 部 · 来自 $_sourceCount 个站点',
-                style: PqType.bodySmall.copyWith(color: p.textMuted, fontSize: 12),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               if (_failed.isNotEmpty)
                 Text(
                   '${_failed.join('、')} 本次未响应，已跳过',
-                  style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
             ],
           ),

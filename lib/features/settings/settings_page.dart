@@ -4,10 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/design/pq_theme.dart';
 import '../../core/ui/adaptive.dart';
 import '../../core/ui/overlay.dart';
-import '../../core/ui/primitives.dart';
 import '../../domain/models/settings.dart';
 import '../../state/connect.dart';
 import '../../state/providers.dart';
@@ -61,354 +59,469 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
     final s = ref.watch(settingsProvider);
     final compact = PqAdaptive.isCompact(context);
-    final backend = ref.read(backendProvider);
     final notifier = ref.read(settingsProvider.notifier);
+    final scheme = Theme.of(context).colorScheme;
 
     return PqBackdrop(
-      child: SingleChildScrollView(
+      child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.only(
-          top: compact ? MediaQuery.paddingOf(context).top + 14 : 20,
+          top: compact ? MediaQuery.paddingOf(context).top + 16 : 20,
           bottom: 52,
         ),
-        child: PqContent(
-          maxWidth: 880,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const PqPageHeader(
-                eyebrow: 'PREFERENCES',
-                title: '设置',
-                subtitle: '改动即时生效，并保存在本机',
-              ),
-              _Group(
-                eyebrow: 'APPEARANCE',
-                title: '外观',
-                children: [
-                  _Row(
-                    title: '主题模式',
-                    subtitle: '深色是默认的放映厅质感，浅色适合白天。',
-                    below: Padding(
-                      padding: const EdgeInsets.only(top: 12),
+        children: [
+          PqContent(
+            maxWidth: 880,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const PqPageHeader(
+                  title: '设置',
+                  subtitle: '改动即时生效，并保存在本机',
+                ),
+                _SettingsGroup(
+                  title: '外观',
+                  children: [
+                    const ListTile(
+                      title: Text('主题模式'),
+                      subtitle: Text('深色适合夜晚，浅色适合白天。'),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: PqSegmented(
-                          items: const ['深色', '浅色', '跟随系统'],
-                          index: switch (s.themeMode) {
-                            ThemeMode.dark => 0,
-                            ThemeMode.light => 1,
-                            ThemeMode.system => 2,
-                          },
-                          onChanged: (i) {
-                            final mode = switch (i) {
-                              0 => ThemeMode.dark,
-                              1 => ThemeMode.light,
-                              _ => ThemeMode.system,
-                            };
-                            notifier.patch(themeMode: mode);
-                          },
+                        child: SegmentedButton<ThemeMode>(
+                          segments: const [
+                            ButtonSegment(
+                              value: ThemeMode.light,
+                              label: Text('浅色'),
+                            ),
+                            ButtonSegment(
+                              value: ThemeMode.dark,
+                              label: Text('深色'),
+                            ),
+                            ButtonSegment(
+                              value: ThemeMode.system,
+                              label: Text('跟随系统'),
+                            ),
+                          ],
+                          selected: {s.themeMode},
+                          showSelectedIcon: false,
+                          onSelectionChanged: (v) =>
+                              notifier.patch(themeMode: v.first),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              _Group(
-                eyebrow: 'PLAYBACK',
-                title: '播放与聚合',
-                children: [
-                  _SliderRow(
-                    title: '搜索并发数',
-                    subtitle: '同时向几个站点发起搜索，数值越高越快，也越容易触发站点限流。',
-                    valueLabel: '${_concurrency.round()} 路',
-                    value: _concurrency,
-                    min: 1,
-                    max: 8,
-                    divisions: 7,
-                    onChanged: (v) => setState(() => _concurrency = v),
-                    onDone: (v) => notifier.patch(searchConcurrency: v.round()),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  _SliderRow(
-                    title: '聚合超时',
-                    subtitle: '单个站点超过这个时间未响应就会被跳过，不阻塞整体结果。',
-                    valueLabel: '${_timeoutSec.round()} 秒',
-                    value: _timeoutSec,
-                    min: 4,
-                    max: 30,
-                    divisions: 26,
-                    onChanged: (v) => setState(() => _timeoutSec = v),
-                    onDone: (v) => notifier.update(
-                      s.copyWith(aggregateTimeoutMs: (v.round() * 1000)),
+                  ],
+                ),
+                _SettingsGroup(
+                  title: '播放与聚合',
+                  children: [
+                    _SliderTile(
+                      title: '搜索并发数',
+                      subtitle: '同时向几个站点发起搜索，数值越高越快，也越容易触发站点限流。',
+                      valueLabel: '${_concurrency.round()} 路',
+                      value: _concurrency,
+                      min: 1,
+                      max: 8,
+                      divisions: 7,
+                      onChanged: (v) => setState(() => _concurrency = v),
+                      onDone: (v) =>
+                          notifier.patch(searchConcurrency: v.round()),
                     ),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  const _Row(
-                    title: '优先源',
-                    subtitle: '播放时优先尝试最近响应更快的站点，无需手动排序。',
-                  ),
-                ],
-              ),
-              _Group(
-                eyebrow: 'LOCAL NETWORK',
-                title: '局域网',
-                children: [
-                  _Row(
-                    title: 'MCP 服务',
-                    subtitle: '允许同一 Wi-Fi 下的客户端调用检索与插件工具。',
-                    trailing: _PqSwitch(
+                    const Divider(height: 1),
+                    _SliderTile(
+                      title: '聚合超时',
+                      subtitle: '单个站点超过这个时间未响应就会被跳过，不阻塞整体结果。',
+                      valueLabel: '${_timeoutSec.round()} 秒',
+                      value: _timeoutSec,
+                      min: 4,
+                      max: 30,
+                      divisions: 26,
+                      onChanged: (v) => setState(() => _timeoutSec = v),
+                      onDone: (v) => notifier.update(
+                        s.copyWith(aggregateTimeoutMs: v.round() * 1000),
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    const ListTile(
+                      title: Text('优先源'),
+                      subtitle: Text('播放时优先尝试最近响应更快的站点，无需手动排序。'),
+                    ),
+                  ],
+                ),
+                _SettingsGroup(
+                  title: '局域网',
+                  children: [
+                    SwitchListTile(
+                      title: const Text('MCP 服务'),
+                      subtitle: const Text('允许同一 Wi-Fi 下的客户端调用检索与插件工具。'),
                       value: s.mcpEnabled,
                       onChanged: (v) async {
                         final c = ref.read(connectProvider.notifier);
                         if (v) {
-                          await c.startMcp(int.tryParse(_mcpPort.text) ?? s.mcpPort);
+                          await c.startMcp(
+                            int.tryParse(_mcpPort.text) ?? s.mcpPort,
+                          );
                         } else {
                           await c.stopMcp();
                         }
                       },
                     ),
-                    below: Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: _PortField(
-                        controller: _mcpPort,
-                        enabled: s.mcpEnabled,
-                        onSave: (v) => _applyPort(mcp: true, value: v, enabled: s.mcpEnabled),
+                    ListTile(
+                      leading: const Icon(Icons.settings_ethernet),
+                      title: const Text('MCP 端口'),
+                      subtitle: Text('${s.mcpPort}'),
+                      trailing: TextButton(
+                        onPressed: () => _editPort(mcp: true),
+                        child: const Text('编辑'),
                       ),
                     ),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  _Row(
-                    title: '同步服务',
-                    subtitle: '在两台设备之间合并插件、站点、收藏与历史。',
-                    trailing: _PqSwitch(
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      title: const Text('同步服务'),
+                      subtitle: const Text('在两台设备之间合并插件、站点、收藏与历史。'),
                       value: s.syncEnabled,
                       onChanged: (v) async {
                         final c = ref.read(connectProvider.notifier);
                         if (v) {
-                          await c.startSync(int.tryParse(_syncPort.text) ?? s.syncPort);
+                          await c.startSync(
+                            int.tryParse(_syncPort.text) ?? s.syncPort,
+                          );
                         } else {
                           await c.stopSync();
                         }
                       },
                     ),
-                    below: Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: _PortField(
-                        controller: _syncPort,
-                        enabled: s.syncEnabled,
-                        onSave: (v) => _applyPort(mcp: false, value: v, enabled: s.syncEnabled),
+                    ListTile(
+                      leading: const Icon(Icons.settings_ethernet),
+                      title: const Text('同步端口'),
+                      subtitle: Text('${s.syncPort}'),
+                      trailing: TextButton(
+                        onPressed: () => _editPort(mcp: false),
+                        child: const Text('编辑'),
                       ),
                     ),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  const _Hint(
-                    icon: Icons.info_outline_rounded,
-                    text: '修改端口后正在运行的服务会重启一次；若端口被占用，会自动回退到可用端口。',
-                  ),
-                ],
-              ),
-              _Group(
-                eyebrow: 'UPDATE',
-                title: '更新',
-                children: [
-                  _Row(
-                    title: '自动检查更新',
-                    subtitle: '启动时静默检查一次，不打断当前操作。',
-                    trailing: _PqSwitch(
+                    const Divider(height: 1),
+                    const ListTile(
+                      leading: Icon(Icons.info_outline),
+                      title: Text('端口说明'),
+                      subtitle: Text(
+                        '修改端口后正在运行的服务会重启一次；若端口被占用，会自动回退到可用端口。',
+                      ),
+                    ),
+                  ],
+                ),
+                _SettingsGroup(
+                  title: '更新',
+                  children: [
+                    SwitchListTile(
+                      title: const Text('自动检查更新'),
+                      subtitle: const Text('启动时静默检查一次，不打断当前操作。'),
                       value: s.autoCheckUpdate,
                       onChanged: (v) => notifier.patch(autoCheckUpdate: v),
                     ),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  _Row(
-                    title: '优先使用 gh-proxy',
-                    subtitle: '下载更新包时先走代理，失败再回落直连。',
-                    trailing: _PqSwitch(
+                    SwitchListTile(
+                      title: const Text('优先使用 gh-proxy'),
+                      subtitle: const Text('下载更新包时先走代理，失败再回落直连。'),
                       value: s.preferProxy,
                       onChanged: (v) => notifier.patch(preferProxy: v),
                     ),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  _Row(
-                    title: '更新来源',
-                    subtitle: '换成自己的 fork 时，同时修改这里的所有者与仓库名。',
-                    below: Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: LayoutBuilder(
-                        builder: (ctx, c) {
-                          final owner = _LabeledField(
-                            label: '所有者',
-                            controller: _repoOwner,
-                            hint: 'losfer',
-                            onSave: (_) => _saveRepo(notifier),
-                          );
-                          final name = _LabeledField(
-                            label: '仓库名',
-                            controller: _repoName,
-                            hint: 'poqi',
-                            onSave: (_) => _saveRepo(notifier),
-                          );
-                          final save = TextButton(
-                            onPressed: () => _saveRepo(notifier),
-                            child: const Text('保存'),
-                          );
-                          if (c.maxWidth < 420) {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(child: owner),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: name),
-                                  ],
-                                ),
-                                Align(alignment: Alignment.centerRight, child: save),
-                              ],
-                            );
-                          }
-                          return Row(
-                            children: [
-                              Expanded(child: owner),
-                              const SizedBox(width: 10),
-                              Expanded(child: name),
-                              const SizedBox(width: 6),
-                              Padding(
-                                padding: const EdgeInsets.only(top: 18),
-                                child: save,
-                              ),
-                            ],
-                          );
-                        },
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.link),
+                      title: const Text('更新来源'),
+                      subtitle: Text(
+                        'github.com/${s.repoOwner}/${s.repoName}\n换成自己的 fork 时，同时修改所有者与仓库名。',
+                      ),
+                      isThreeLine: true,
+                      trailing: TextButton(
+                        onPressed: _editRepo,
+                        child: const Text('编辑'),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              _Group(
-                eyebrow: 'DEVICE & DATA',
-                title: '设备与数据',
-                children: [
-                  _Row(
-                    title: '设备名称',
-                    subtitle: '显示在附近设备与配对码里，便于在两台设备间核对。',
-                    below: Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: _LabeledField(
-                        label: '名称',
-                        controller: _deviceName,
-                        hint: '例如：客厅放映机',
-                        onSave: (v) {
-                          if (v.isEmpty) {
-                            showPqToast(context, '设备名称不能为空', kind: PqToastKind.error);
-                            _deviceName.text = _deviceLabel(s);
-                            return;
-                          }
-                          notifier.patch(deviceName: v);
-                          showPqToast(context, '设备名称已保存', kind: PqToastKind.success);
-                        },
+                  ],
+                ),
+                _SettingsGroup(
+                  title: '设备与数据',
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.badge_outlined),
+                      title: const Text('设备名称'),
+                      subtitle: Text(_deviceLabel(s)),
+                      trailing: TextButton(
+                        onPressed: () => _editDeviceName(s),
+                        child: const Text('编辑'),
                       ),
                     ),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  _ActionRow(
-                    title: '导出快照',
-                    subtitle: '把插件、站点、收藏与历史导出为 JSON 并复制到剪贴板。',
-                    action: OutlinedButton(
-                      onPressed: () async {
-                        final json = const JsonEncoder.withIndent('  ')
-                            .convert(backend.snapshot().toJson());
-                        await Clipboard.setData(ClipboardData(text: json));
-                        if (!context.mounted) return;
-                        showPqToast(
-                          context,
-                          '快照已复制 · ${(json.length / 1024).toStringAsFixed(1)} KB',
-                          kind: PqToastKind.success,
-                        );
-                      },
-                      child: const Text('导出'),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.ios_share),
+                      title: const Text('导出快照'),
+                      subtitle: const Text('把插件、站点、收藏与历史导出为 JSON 并复制到剪贴板。'),
+                      trailing: FilledButton.tonal(
+                        onPressed: _exportSnapshot,
+                        child: const Text('导出'),
+                      ),
                     ),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  _ActionRow(
-                    title: '清空观看历史',
-                    subtitle: '收藏与站点配置不受影响，仅移除播放记录与进度。',
-                    action: OutlinedButton(
-                      onPressed: () async {
-                        final ok = await _confirm(
-                          context,
-                          title: '清空观看历史',
-                          message: '${ref.read(historyProvider).length} 条观看记录将被删除，且无法恢复。',
-                          confirmLabel: '清空',
-                        );
-                        if (!ok) return;
-                        await ref.read(historyProvider.notifier).clear();
-                        if (!context.mounted) return;
-                        showPqToast(context, '观看历史已清空', kind: PqToastKind.success);
-                      },
-                      child: const Text('清空'),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: Icon(Icons.delete_outline, color: scheme.error),
+                      title: Text(
+                        '清空观看历史',
+                        style: TextStyle(color: scheme.error),
+                      ),
+                      subtitle: const Text('收藏与站点配置不受影响，仅移除播放记录与进度。'),
+                      trailing: TextButton(
+                        onPressed: _clearHistory,
+                        style: TextButton.styleFrom(foregroundColor: scheme.error),
+                        child: const Text('清空'),
+                      ),
+                      onTap: _clearHistory,
                     ),
-                  ),
-                  Divider(color: p.lineSoft, height: 1),
-                  _ActionRow(
-                    title: '恢复内置插件',
-                    subtitle: '把被修改过的内置插件恢复为随包版本，自定义插件不受影响。',
-                    action: OutlinedButton(
-                      onPressed: () async {
-                        final builtins =
-                            ref.read(pluginsProvider).where((e) => e.builtin).toList();
-                        if (builtins.isEmpty) {
-                          showPqToast(context, '没有可恢复的内置插件');
-                          return;
-                        }
-                        final ok = await _confirm(
-                          context,
-                          title: '恢复内置插件',
-                          message: '${builtins.length} 个内置插件将回到随包版本，已有的本地修改会被覆盖。',
-                          confirmLabel: '恢复',
-                        );
-                        if (!ok) return;
-                        for (final b in builtins) {
-                          await ref.read(pluginsProvider.notifier).restoreBuiltin(b.id);
-                        }
-                        if (!context.mounted) return;
-                        showPqToast(context, '内置插件已恢复', kind: PqToastKind.success);
-                      },
-                      child: const Text('恢复'),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.settings_backup_restore),
+                      title: const Text('恢复内置插件'),
+                      subtitle: const Text('把被修改过的内置插件恢复为随包版本，自定义插件不受影响。'),
+                      trailing: TextButton(
+                        onPressed: _restoreBuiltins,
+                        child: const Text('恢复'),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              _Group(
-                eyebrow: 'ABOUT',
-                title: '关于',
-                children: [
-                  const _MetaRow(label: '应用名称', value: 'Poqi'),
-                  Divider(color: p.lineSoft, height: 1),
-                  const _MetaRow(label: '版本', value: '1.0.0'),
-                  Divider(color: p.lineSoft, height: 1),
-                  const _MetaRow(label: '包名', value: 'cn.losfer.Poqi'),
-                  Divider(color: p.lineSoft, height: 1),
-                  _MetaRow(label: '仓库', value: 'github.com/${s.repoOwner}/${s.repoName}'),
-                  Divider(color: p.lineSoft, height: 1),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    child: Text(
-                      'Poqi 是开源的影视聚合器：站点规则以插件形式编写，数据留在本机，'
-                      '局域网内的 MCP 与同步都只依赖本地网络。',
-                      style: PqType.bodySmall.copyWith(color: p.textMuted, height: 1.7),
+                  ],
+                ),
+                _SettingsGroup(
+                  title: '关于',
+                  children: [
+                    const ListTile(
+                      title: Text('应用名称'),
+                      trailing: Text('Poqi'),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                    const Divider(height: 1),
+                    const ListTile(
+                      title: Text('版本'),
+                      trailing: Text('1.0.0'),
+                    ),
+                    const Divider(height: 1),
+                    const ListTile(
+                      title: Text('包名'),
+                      trailing: Text('cn.losfer.Poqi'),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      title: const Text('仓库'),
+                      subtitle: Text('github.com/${s.repoOwner}/${s.repoName}'),
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'Poqi 是开源的影视聚合器：站点规则以插件形式编写，数据留在本机，'
+                        '局域网内的 MCP 与同步都只依赖本地网络。',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                              height: 1.7,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 编辑
+  // ---------------------------------------------------------------------------
+
+  Future<void> _editPort({required bool mcp}) async {
+    final s = ref.read(settingsProvider);
+    final current = '${mcp ? s.mcpPort : s.syncPort}';
+    var draft = current;
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(mcp ? 'MCP 端口' : '同步端口'),
+        content: TextFormField(
+          initialValue: current,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(
+            labelText: '端口',
+            helperText: '1024–65535',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (v) => draft = v,
+          onFieldSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(draft),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+
+    final value = result.trim();
+    (mcp ? _mcpPort : _syncPort).text = value;
+    await _applyPort(
+      mcp: mcp,
+      value: value,
+      enabled: mcp ? s.mcpEnabled : s.syncEnabled,
+    );
+  }
+
+  Future<void> _editRepo() async {
+    var owner = _repoOwner.text;
+    var name = _repoName.text;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('更新来源'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              initialValue: owner,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '所有者',
+                hintText: 'losfer',
+              ),
+              onChanged: (v) => owner = v,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              initialValue: name,
+              decoration: const InputDecoration(
+                labelText: '仓库名',
+                hintText: 'poqi',
+              ),
+              onChanged: (v) => name = v,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+
+    _repoOwner.text = owner.trim();
+    _repoName.text = name.trim();
+    await _saveRepo(ref.read(settingsProvider.notifier));
+  }
+
+  Future<void> _editDeviceName(AppSettings s) async {
+    var draft = _deviceName.text;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('设备名称'),
+        content: TextFormField(
+          initialValue: draft,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: '名称',
+            hintText: '例如：客厅放映机',
+          ),
+          onChanged: (v) => draft = v,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+
+    final value = draft.trim();
+    if (value.isEmpty) {
+      showPqToast(context, '设备名称不能为空', kind: PqToastKind.error);
+      _deviceName.text = _deviceLabel(s);
+      return;
+    }
+    _deviceName.text = value;
+    await ref.read(settingsProvider.notifier).patch(deviceName: value);
+    if (!mounted) return;
+    showPqToast(context, '设备名称已保存', kind: PqToastKind.success);
+  }
+
+  Future<void> _exportSnapshot() async {
+    final backend = ref.read(backendProvider);
+    final json =
+        const JsonEncoder.withIndent('  ').convert(backend.snapshot().toJson());
+    await Clipboard.setData(ClipboardData(text: json));
+    if (!mounted) return;
+    showPqToast(
+      context,
+      '快照已复制 · ${(json.length / 1024).toStringAsFixed(1)} KB',
+      kind: PqToastKind.success,
+    );
+  }
+
+  Future<void> _clearHistory() async {
+    final ok = await _confirm(
+      context,
+      title: '清空观看历史',
+      message: '${ref.read(historyProvider).length} 条观看记录将被删除，且无法恢复。',
+      confirmLabel: '清空',
+    );
+    if (!ok) return;
+    await ref.read(historyProvider.notifier).clear();
+    if (!mounted) return;
+    showPqToast(context, '观看历史已清空', kind: PqToastKind.success);
+  }
+
+  Future<void> _restoreBuiltins() async {
+    final builtins = ref.read(pluginsProvider).where((e) => e.builtin).toList();
+    if (builtins.isEmpty) {
+      showPqToast(context, '没有可恢复的内置插件');
+      return;
+    }
+    final ok = await _confirm(
+      context,
+      title: '恢复内置插件',
+      message: '${builtins.length} 个内置插件将回到随包版本，已有的本地修改会被覆盖。',
+      confirmLabel: '恢复',
+    );
+    if (!ok) return;
+    for (final b in builtins) {
+      await ref.read(pluginsProvider.notifier).restoreBuiltin(b.id);
+    }
+    if (!mounted) return;
+    showPqToast(context, '内置插件已恢复', kind: PqToastKind.success);
   }
 
   Future<void> _saveRepo(SettingsNotifier notifier) async {
@@ -467,45 +580,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     required String message,
     String confirmLabel = '确认',
   }) async {
-    final p = PqPalette.of(context);
-    final result = await showPqSheet<bool>(
-      context,
-      title: title,
-      maxWidth: 420,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              message,
-              style: PqType.bodySmall.copyWith(color: p.textMuted, height: 1.7),
+    final scheme = Theme.of(context).colorScheme;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: scheme.error,
+              foregroundColor: scheme.onError,
             ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text('取消'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: p.danger,
-                      foregroundColor: p.isDark ? const Color(0xFF1A0908) : Colors.white,
-                    ),
-                    child: Text(confirmLabel),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+            child: Text(confirmLabel),
+          ),
+        ],
       ),
     );
     return result ?? false;
@@ -516,147 +610,35 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 // 基础块
 // -----------------------------------------------------------------------------
 
-class _Group extends StatelessWidget {
-  const _Group({
-    required this.title,
-    required this.children,
-    this.eyebrow,
-  });
+/// 一组设置：小标题 + 卡片，卡片内由 [ListTile] 与 [Divider] 组成。
+class _SettingsGroup extends StatelessWidget {
+  const _SettingsGroup({required this.title, required this.children});
 
   final String title;
-  final String? eyebrow;
   final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 26),
+      padding: const EdgeInsets.only(bottom: 28),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          PqSectionHeader(eyebrow: eyebrow, title: title),
-          const SizedBox(height: 12),
-          PqPanel(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Column(children: children),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Row extends StatelessWidget {
-  const _Row({
-    required this.title,
-    this.subtitle,
-    this.trailing,
-    this.below,
-  });
-
-  final String title;
-  final String? subtitle;
-  final Widget? trailing;
-  final Widget? below;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: PqType.title.copyWith(fontSize: 13.5)),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        subtitle!,
-                        style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
-                      ),
-                    ],
-                  ],
-                ),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            child: Text(
+              title,
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: theme.colorScheme.primary,
               ),
-              if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-            ],
+            ),
           ),
-          if (below != null) below!,
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionRow extends StatelessWidget {
-  const _ActionRow({
-    required this.title,
-    required this.subtitle,
-    required this.action,
-  });
-
-  final String title;
-  final String subtitle;
-  final Widget action;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      child: Row(
-        children: [
-          Expanded(
+          Card(
+            clipBehavior: Clip.antiAlias,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: PqType.title.copyWith(fontSize: 13.5)),
-                const SizedBox(height: 3),
-                Text(
-                  subtitle,
-                  style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          action,
-        ],
-      ),
-    );
-  }
-}
-
-class _MetaRow extends StatelessWidget {
-  const _MetaRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 13),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 92,
-            child: Text(
-              label,
-              style: PqType.bodySmall.copyWith(color: p.textFaint),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: PqType.bodySmall.copyWith(color: p.text, fontSize: 13),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: children,
             ),
           ),
         ],
@@ -665,57 +647,8 @@ class _MetaRow extends StatelessWidget {
   }
 }
 
-class _Hint extends StatelessWidget {
-  const _Hint({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 13, color: p.textFaint),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5, height: 1.6),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PqSwitch extends StatelessWidget {
-  const _PqSwitch({required this.value, required this.onChanged});
-
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Switch(
-      value: value,
-      onChanged: onChanged,
-      activeColor: p.accent,
-      activeTrackColor: p.accent.withOpacity(0.28),
-      inactiveThumbColor: p.textFaint,
-      inactiveTrackColor: p.surfaceHigh,
-      trackOutlineColor: WidgetStatePropertyAll(p.line),
-    );
-  }
-}
-
-class _SliderRow extends StatelessWidget {
-  const _SliderRow({
+class _SliderTile extends StatelessWidget {
+  const _SliderTile({
     required this.title,
     required this.subtitle,
     required this.valueLabel,
@@ -739,183 +672,33 @@ class _SliderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: PqType.title.copyWith(fontSize: 13.5)),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              PqTag(valueLabel, color: p.accent),
-            ],
-          ),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 2,
-              activeTrackColor: p.accent,
-              inactiveTrackColor: p.surfaceHigher,
-              thumbColor: p.accent,
-              overlayColor: p.accent.withOpacity(0.12),
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-              tickMarkShape: SliderTickMarkShape.noTickMark,
-            ),
-            child: Slider(
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              divisions: divisions,
-              onChanged: onChanged,
-              onChangeEnd: onDone,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PortField extends StatelessWidget {
-  const _PortField({
-    required this.controller,
-    required this.enabled,
-    required this.onSave,
-  });
-
-  final TextEditingController controller;
-  final bool enabled;
-  final ValueChanged<String> onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Row(
-      children: [
-        SizedBox(
-          width: 132,
-          child: _AutoField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            onSave: onSave,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            enabled ? '服务运行中，修改后会重启' : '服务停止时也可先保存',
-            maxLines: 2,
-            style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _LabeledField extends StatelessWidget {
-  const _LabeledField({
-    required this.label,
-    required this.controller,
-    required this.onSave,
-    this.hint,
-  });
-
-  final String label;
-  final TextEditingController controller;
-  final ValueChanged<String> onSave;
-  final String? hint;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          label,
-          style: PqType.eyebrow.copyWith(fontSize: 9, color: p.textFaint),
+        ListTile(
+          title: Text(title),
+          subtitle: Text(subtitle),
+          trailing: Text(
+            valueLabel,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.primary,
+            ),
+          ),
         ),
-        const SizedBox(height: 6),
-        _AutoField(controller: controller, hint: hint, onSave: onSave),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: divisions,
+            label: valueLabel,
+            onChanged: onChanged,
+            onChangeEnd: onDone,
+          ),
+        ),
       ],
-    );
-  }
-}
-
-/// 失焦或回车时提交，避免每敲一个字就写盘。
-class _AutoField extends StatefulWidget {
-  const _AutoField({
-    required this.controller,
-    required this.onSave,
-    this.hint,
-    this.keyboardType,
-    this.inputFormatters,
-  });
-
-  final TextEditingController controller;
-  final ValueChanged<String> onSave;
-  final String? hint;
-  final TextInputType? keyboardType;
-  final List<TextInputFormatter>? inputFormatters;
-
-  @override
-  State<_AutoField> createState() => _AutoFieldState();
-}
-
-class _AutoFieldState extends State<_AutoField> {
-  final _node = FocusNode();
-  late String _last = widget.controller.text.trim();
-
-  @override
-  void initState() {
-    super.initState();
-    _node.addListener(_onFocus);
-  }
-
-  @override
-  void dispose() {
-    _node.removeListener(_onFocus);
-    _node.dispose();
-    super.dispose();
-  }
-
-  void _onFocus() {
-    if (!_node.hasFocus) _commit();
-  }
-
-  void _commit() {
-    final v = widget.controller.text.trim();
-    if (v == _last) return;
-    _last = v;
-    widget.onSave(v);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: widget.controller,
-      focusNode: _node,
-      keyboardType: widget.keyboardType,
-      inputFormatters: widget.inputFormatters,
-      onSubmitted: (_) => _commit(),
-      style: PqType.body.copyWith(fontSize: 13),
-      decoration: InputDecoration(hintText: widget.hint),
     );
   }
 }

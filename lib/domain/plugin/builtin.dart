@@ -1,33 +1,225 @@
+import 'dart:convert';
+
 import '../models/plugin.dart';
 import '../models/site.dart';
 
-/// 随包分发的插件。它们同时是"可运行的文档"：
-/// 每一个字段都在插件页的说明书里被解释。
-const _prism = '''
+/// 随包分发的真实插件：苹果CMS v10 与 TVBox 接口。
+///
+/// 两者共享 CMS JSON 协议的字段映射；TVBox 额外从接口 JSON 里
+/// 解析出目标站点的 api 地址。
+/// 苹果CMS v10 的 JS 脚本。
+///
+/// 选择 JS 而不是声明式：这个站点的剧集是 `$$$` 分线路、`#` 分集、
+/// `$` 分「集名/地址」的复合字符串，声明式需要额外约定 split 格式，
+/// 而脚本里三行 split 就能表达清楚，也更容易按站点微调。
+const _cmsV10Script = r"""
+// 苹果CMS v10 —— Poqi JS 插件
+// ctx 可用字段：body / json / url / base / page / keyword / category / id / cfg / vars
+function cmsList(ctx) {
+  var j = ctx.json || {};
+  var list = j.list || j.data || [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) out.push(cmsItem(list[i], ctx.base));
+  return out;
+}
+
+function cmsItem(it, base) {
+  return {
+    id: String(it.vod_id == null ? '' : it.vod_id),
+    title: pq.trim(it.vod_name),
+    poster: pq.abs(base, pq.trim(it.vod_pic)),
+    year: pq.trim(it.vod_year),
+    area: pq.trim(it.vod_area),
+    remarks: pq.trim(it.vod_remarks),
+    score: pq.trim(it.vod_score),
+    kind: pq.trim(it.type_name),
+    intro: pq.clean(it.vod_blurb || '')
+  };
+}
+
+function home(ctx) { return cmsList(ctx); }
+function category(ctx) { return cmsList(ctx); }
+function search(ctx) { return cmsList(ctx); }
+
+function detail(ctx) {
+  var j = ctx.json || {};
+  var list = j.list || j.data || [];
+  var it = list.length ? list[0] : {};
+  var d = cmsItem(it, ctx.base);
+  if (!d.id) d.id = String(ctx.id == null ? '' : ctx.id);
+  d.intro = pq.clean(it.vod_content || it.vod_blurb || '');
+  d.director = pq.trim(it.vod_director);
+  d.actors = pq.trim(it.vod_actor).split(/[,，\\/、]/).filter(function (s) { return s; });
+  d.lines = cmsLines(it.vod_play_from, it.vod_play_url, ctx.base);
+  return d;
+}
+
+// vod_play_url 形如：第01集$https://a/1.m3u8#第02集$...$$$第01集$https://b/1.m3u8
+// vod_play_from 用 $$$ 分隔线路名，数量通常与上面一致。
+function cmsLines(fromRaw, urlRaw, base) {
+  var lines = [];
+  if (!urlRaw) return lines;
+  var names = String(fromRaw || '').split('$$$');
+  var groups = String(urlRaw).split('$$$');
+  for (var g = 0; g < groups.length; g++) {
+    var lineName = pq.trim(names[g]) || ('线路' + (g + 1));
+    var parts = groups[g].split('#');
+    var eps = [];
+    for (var i = 0; i < parts.length; i++) {
+      var seg = pq.trim(parts[i]);
+      if (!seg) continue;
+      var cut = seg.indexOf('$');
+      var epName = cut < 0 ? '' : seg.slice(0, cut);
+      var epUrl = cut < 0 ? seg : seg.slice(cut + 1);
+      epUrl = pq.abs(base, pq.trim(epUrl));
+      if (!epUrl) continue;
+      eps.push({ name: pq.trim(epName) || ('第' + (i + 1) + '集'), url: epUrl });
+    }
+    if (eps.length) lines.push({ name: lineName, episodes: eps });
+  }
+  return lines;
+}
+
+// 剧集地址本身就是播放地址，不需要再请求。
+function play(ctx) { return { url: String(ctx.id == null ? '' : ctx.id) }; }
+""";
+
+final _cmsV10 = const JsonEncoder.withIndent('  ').convert({
+  'spec': 1,
+  'id': 'poqi.cms.v10',
+  'name': '苹果CMS v10',
+  'version': '2.0.0',
+  'author': 'Poqi',
+  'description': '适配苹果CMS v10 标准 JSON 接口（/api.php/provide/vod/），'
+      '用 JS 脚本完成列表、搜索、详情与多线路剧集映射。',
+  'engine': 'js',
+  'script': _cmsV10Script,
+  'baseUrl': 'https://example.com',
+  'headers': {'Accept': 'application/json'},
+  'config': [
+    {
+      'key': 'api',
+      'label': '接口地址',
+      'required': true,
+      'hint': 'https://example.com/api.php/provide/vod/',
+      'help': '填完整的 provide/vod 接口地址，末尾斜杠可保留',
+    },
+    {
+      'key': 'ua',
+      'label': 'User-Agent',
+      'hint': '留空使用默认浏览器 UA',
+      'help': '部分站点会校验 UA，遇到 403 时可粘贴浏览器 UA',
+    },
+  ],
+  'endpoints': {
+    'home': {
+      'request': {
+        'path': r'{{coalesce(cfg.api, base + "/api.php/provide/vod/")}}',
+        'query': {'ac': 'list', 'pg': '{{page}}'},
+        'headers': {
+          'User-Agent': r"{{coalesce(cfg.ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')}}",
+        },
+      },
+      'js': 'home',
+    },
+    'category': {
+      'request': {
+        'path': r'{{coalesce(cfg.api, base + "/api.php/provide/vod/")}}',
+        'query': {'ac': 'list', 't': '{{category}}', 'pg': '{{page}}'},
+        'headers': {
+          'User-Agent': r"{{coalesce(cfg.ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')}}",
+        },
+      },
+      'js': 'category',
+    },
+    'search': {
+      'request': {
+        'path': r'{{coalesce(cfg.api, base + "/api.php/provide/vod/")}}',
+        'query': {'ac': 'detail', 'wd': '{{keyword}}', 'pg': '{{page}}'},
+        'headers': {
+          'User-Agent': r"{{coalesce(cfg.ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')}}",
+        },
+      },
+      'js': 'search',
+    },
+    'detail': {
+      'request': {
+        'path': r'{{coalesce(cfg.api, base + "/api.php/provide/vod/")}}',
+        'query': {'ac': 'detail', 'ids': '{{id}}'},
+        'headers': {
+          'User-Agent': r"{{coalesce(cfg.ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')}}",
+        },
+      },
+      'js': 'detail',
+    },
+    'play': {
+      'request': {'path': ''},
+      'js': 'play',
+    },
+  },
+  'notes': '适用：苹果CMS v10 及其衍生站点的标准 JSON 接口。\n'
+      '配置：只需填「接口地址」，形如 https://example.com/api.php/provide/vod/。\n'
+      r'为什么用 JS：剧集字段 vod_play_url 是「线路$$$线路、集#集、集名$地址」的复合字符串，'
+      '脚本里直接 split 比声明式规则更直观，也方便按站点微调。\n'
+      '想改字段映射：打开本插件的源码，改 cmsItem / cmsLines 两个函数即可，'
+      '保存后用「试跑端点」验证，无需重新打包。\n'
+      '已知限制：分类筛选依赖站点的分类 id（t 参数），不同的站 id 不同，'
+      '所以没有内置分类表；播放地址即剧集地址，不做二次解析。',
+});
+
+const _tvboxApi = r'''
 {
   "spec": 1,
-  "id": "poqi.demo.prism",
-  "name": "棱镜 · 演示源",
-  "version": "1.2.0",
-  "author": "Poqi Lab",
-  "description": "覆盖电影、剧集、动漫、综艺与纪录片的综合演示插件，用来观察聚合、去重与排序行为。",
-  "engine": "demo",
-  "baseUrl": "https://demo.poqi.local",
-  "headers": { "User-Agent": "Poqi/1.0" },
+  "id": "poqi.tvbox.api",
+  "name": "TVBox 接口",
+  "version": "1.0.0",
+  "author": "Poqi",
+  "description": "读取 TVBox 接口 JSON，自动挑选 type=1 的站点并复用苹果CMS 标准协议解析列表、搜索、详情与播放。",
+  "engine": "http",
+  "baseUrl": "https://example.com",
+  "headers": { "Accept": "application/json" },
   "config": [
-    { "key": "apiKey", "label": "接口密钥", "type": "password", "secret": true, "hint": "演示环境可留空" },
-    { "key": "area", "label": "内容偏好", "type": "select", "options": ["全部", "内地", "港台", "日韩", "欧美"], "default": "全部" },
-    { "key": "adFree", "label": "过滤推广位", "type": "boolean", "default": "true" }
+    {
+      "key": "interface",
+      "label": "接口 JSON 地址",
+      "required": true,
+      "hint": "https://example.com/tvbox.json",
+      "help": "填 TVBox 接口配置的原始 JSON 地址（不是多仓仓库地址）"
+    },
+    {
+      "key": "siteKey",
+      "label": "站点 key 或名称",
+      "hint": "留空自动取第一个 type=1 的站点",
+      "help": "填 TVBox sites 数组里的 key（如 csp_Xxx）或 name；留空则自动选择"
+    },
+    {
+      "key": "ua",
+      "label": "User-Agent",
+      "hint": "留空使用默认浏览器 UA",
+      "help": "接口与站点请求共用该 UA，遇到 403 时可粘贴浏览器 UA"
+    }
   ],
   "vars": {
-    "session": { "expr": "'demo-' + md5(cfg.apiKey + today())", "ttl": 3600 }
+    "sites": {
+      "expr": "coalesce(path(http.get(cfg.interface), 'sites'), [])",
+      "ttl": 3600
+    },
+    "api": {
+      "expr": "coalesce(if(coalesce(cfg.siteKey, '') == '', path(first(where(vars.sites, 'type', 1)), 'api'), coalesce(path(first(where(vars.sites, 'key', cfg.siteKey)), 'api'), path(first(where(vars.sites, 'name', cfg.siteKey)), 'api'))), '')",
+      "ttl": 3600
+    }
   },
   "endpoints": {
     "home": {
-      "request": { "path": "/v1/home", "query": { "page": "{{page}}" } },
+      "request": {
+        "path": "{{vars.api}}",
+        "query": { "ac": "list", "pg": "{{page}}" },
+        "headers": { "User-Agent": "{{coalesce(cfg.ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')}}" }
+      },
+      "pageSize": 20,
       "parse": {
         "format": "json",
-        "root": "data.list",
+        "root": "list",
         "fields": {
           "id": "item.vod_id",
           "title": "item.vod_name",
@@ -35,257 +227,122 @@ const _prism = '''
           "year": "item.vod_year",
           "score": "item.vod_score",
           "remarks": "item.vod_remarks",
+          "area": "item.vod_area",
           "kind": "item.type_name"
         }
       }
     },
     "category": {
-      "request": { "path": "/v1/list", "query": { "t": "{{category}}", "pg": "{{page}}" } },
-      "filters": [
-        { "key": "area", "label": "地区", "values": ["全部", "内地", "港台", "日韩", "欧美"] },
-        { "key": "year", "label": "年份", "values": ["全部", "2026", "2025", "2024"] }
-      ],
+      "request": {
+        "path": "{{vars.api}}",
+        "query": { "ac": "list", "t": "{{category}}", "pg": "{{page}}" },
+        "headers": { "User-Agent": "{{coalesce(cfg.ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')}}" }
+      },
+      "pageSize": 20,
       "parse": {
         "format": "json",
-        "root": "data.list",
+        "root": "list",
         "fields": {
           "id": "item.vod_id",
           "title": "item.vod_name",
           "poster": "item.vod_pic",
           "year": "item.vod_year",
           "score": "item.vod_score",
-          "remarks": "item.vod_remarks"
+          "remarks": "item.vod_remarks",
+          "area": "item.vod_area",
+          "kind": "item.type_name"
         }
       }
     },
     "search": {
-      "request": { "path": "/v1/search", "query": { "wd": "{{keyword}}" } },
+      "request": {
+        "path": "{{vars.api}}",
+        "query": { "ac": "detail", "wd": "{{keyword}}", "pg": "{{page}}" },
+        "headers": { "User-Agent": "{{coalesce(cfg.ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')}}" }
+      },
+      "pageSize": 20,
       "parse": {
         "format": "json",
-        "root": "data.list",
+        "root": "list",
         "fields": {
           "id": "item.vod_id",
           "title": "item.vod_name",
           "poster": "item.vod_pic",
-          "remarks": "item.vod_remarks"
+          "year": "item.vod_year",
+          "score": "item.vod_score",
+          "remarks": "item.vod_remarks",
+          "area": "item.vod_area",
+          "kind": "item.type_name"
         }
       }
     },
     "detail": {
-      "request": { "path": "/v1/detail", "query": { "id": "{{id}}" }, "headers": { "X-Session": "{{vars.session}}" } },
+      "request": {
+        "path": "{{vars.api}}",
+        "query": { "ac": "detail", "ids": "{{id}}" },
+        "headers": { "User-Agent": "{{coalesce(cfg.ua, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')}}" }
+      },
       "parse": {
         "format": "json",
-        "root": "data",
+        "root": "list",
         "fields": {
           "id": "item.vod_id",
           "title": "item.vod_name",
           "poster": "item.vod_pic",
           "intro": "item.vod_content",
           "director": "item.vod_director",
-          "actors": "item.vod_actor"
+          "actors": "item.vod_actor",
+          "year": "item.vod_year",
+          "score": "item.vod_score",
+          "remarks": "item.vod_remarks",
+          "area": "item.vod_area",
+          "kind": "item.type_name",
+          "tags": "item.vod_class"
         },
         "episodes": {
-          "format": "json",
-          "root": "data.episodes",
-          "fields": { "name": "item.name", "url": "item.url", "line": "item.line" }
+          "format": "split",
+          "from": "item.vod_play_url",
+          "lineNames": "item.vod_play_from"
         }
       }
     },
     "play": {
-      "request": { "path": "/v1/play", "query": { "url": "{{id}}" } },
-      "parse": { "format": "json", "root": "data", "fields": { "url": "item.play_url" } }
+      "request": { "path": "" },
+      "parse": { "format": "json", "fields": { "url": "{{id}}" } }
     }
   },
-  "notes": "演示引擎不走网络，但规则与真实插件完全一致，可直接照抄结构改成 HTTP 插件。"
-}
-''';
-
-const _tide = '''
-{
-  "spec": 1,
-  "id": "poqi.demo.tide",
-  "name": "潮汐影库",
-  "version": "0.9.3",
-  "author": "Poqi Lab",
-  "description": "偏剧集与综艺的演示站点，用于验证多站点聚合时的排序与去重。",
-  "engine": "demo",
-  "baseUrl": "https://tide.poqi.local",
-  "config": [
-    { "key": "token", "label": "接口 Token", "type": "password", "secret": true, "required": false, "refreshSeconds": 86400 },
-    { "key": "quality", "label": "清晰度偏好", "type": "select", "options": ["1080P", "720P", "自动"], "default": "自动" }
-  ],
-  "vars": {
-    "token": { "expr": "'tk_' + substr(md5(cfg.token + ts()), 0, 16)", "ttl": 1800 }
-  },
-  "endpoints": {
-    "home": {
-      "request": { "path": "/home", "headers": { "Authorization": "Bearer {{vars.token}}" } },
-      "parse": {
-        "format": "html",
-        "root": ".feed .card",
-        "fields": {
-          "id": "attr(sel(item, 'a'), 'href')",
-          "title": "text(sel(item, '.card-title'))",
-          "poster": "attr(sel(item, 'img'), 'data-src')",
-          "remarks": "text(sel(item, '.card-badge'))"
-        }
-      }
-    },
-    "search": {
-      "request": { "path": "/search", "query": { "q": "{{keyword}}" } },
-      "parse": {
-        "format": "html",
-        "root": ".result-item",
-        "fields": {
-          "id": "attr(sel(item, 'a'), 'href')",
-          "title": "text(sel(item, 'h3'))"
-        }
-      }
-    },
-    "detail": {
-      "request": { "path": "/detail/{{id}}" },
-      "parse": {
-        "format": "html",
-        "root": ".detail",
-        "fields": {
-          "id": "{{id}}",
-          "title": "text(sel(item, 'h1'))",
-          "intro": "text(sel(item, '.intro'))"
-        },
-        "episodes": {
-          "format": "html",
-          "root": ".episode-list a",
-          "fields": { "name": "text(item)", "url": "attr(item, 'href')" }
-        }
-      }
-    }
-  },
-  "notes": "这个插件演示了 HTML + CSS 选择器的写法：sel / text / attr 三个函数足够覆盖大多数站点。"
-}
-''';
-
-const _nightOwl = '''
-{
-  "spec": 1,
-  "id": "poqi.demo.nightowl",
-  "name": "夜枭放映室",
-  "version": "2.0.1",
-  "author": "Poqi Lab",
-  "description": "以电影为主的演示站点，演示如何用 vars 定时换取临时签名。",
-  "engine": "demo",
-  "baseUrl": "https://owl.poqi.local",
-  "config": [
-    { "key": "cookie", "label": "Cookie", "type": "text", "secret": true, "hint": "从浏览器复制完整 Cookie" },
-    { "key": "signKey", "label": "签名密钥", "type": "password", "secret": true }
-  ],
-  "vars": {
-    "sign": { "expr": "md5(cfg.cookie + cfg.signKey + today())", "ttl": 7200 }
-  },
-  "endpoints": {
-    "home": {
-      "request": { "path": "/api/home", "headers": { "X-Sign": "{{vars.sign}}" } },
-      "parse": {
-        "format": "json",
-        "root": "result",
-        "fields": { "id": "item.id", "title": "item.title", "poster": "item.cover" }
-      }
-    },
-    "search": {
-      "request": { "path": "/api/search", "query": { "kw": "{{keyword}}", "sign": "{{vars.sign}}" } },
-      "parse": {
-        "format": "json",
-        "root": "result",
-        "fields": { "id": "item.id", "title": "item.title", "poster": "item.cover" }
-      }
-    }
-  },
-  "notes": "签名类站点的典型写法：把签名放进 vars，设置 ttl，请求里引用 {{vars.sign}}。"
-}
-''';
-
-const _atlas = '''
-{
-  "spec": 1,
-  "id": "poqi.demo.atlas",
-  "name": "图鉴资料馆",
-  "version": "1.0.0",
-  "author": "Poqi Lab",
-  "description": "纪录片与人文类内容演示站点，用于验证'优先源'与播放回退策略。",
-  "engine": "demo",
-  "baseUrl": "https://atlas.poqi.local",
-  "config": [
-    { "key": "token", "label": "访问令牌", "type": "password", "secret": true }
-  ],
-  "endpoints": {
-    "home": {
-      "request": { "path": "/docs", "headers": { "Authorization": "{{vars.token}}" } },
-      "parse": {
-        "format": "html",
-        "root": ".entry",
-        "fields": { "id": "attr(sel(item, 'a'), 'href')", "title": "text(sel(item, 'h2'))" }
-      }
-    },
-    "search": {
-      "request": { "path": "/docs/search", "query": { "kw": "{{keyword}}" } },
-      "parse": {
-        "format": "html",
-        "root": ".entry",
-        "fields": { "id": "attr(sel(item, 'a'), 'href')", "title": "text(sel(item, 'h2'))" }
-      }
-    }
-  }
+  "notes": "适用：TVBox 单仓接口（根节点含 sites 数组）。配置：填写「接口 JSON 地址」；siteKey 留空时自动选择第一个 type=1 的站点，也可以填 sites 里的 key 或 name 精确指定。\n接口 JSON 会缓存 1 小时（vars.ttl=3600），选中站点的 api 通常是 /api.php/provide/vod/，因此列表、搜索、详情、剧集拆分与苹果CMS 插件完全一致。\n已知限制：仅支持单仓结构；如果接口根节点只有 urls（多仓/仓库列表），请打开具体仓库的 JSON 地址再填入，本插件不会自动展开多仓。type 不是 1 的站点（如 jar/csp 扩展、直播源）不受支持。"
 }
 ''';
 
 List<PluginManifest> builtinPlugins() => [
-      PluginManifest.fromJsonString(_prism).copyWith(builtin: true),
-      PluginManifest.fromJsonString(_tide).copyWith(builtin: true),
-      PluginManifest.fromJsonString(_nightOwl).copyWith(builtin: true),
-      PluginManifest.fromJsonString(_atlas).copyWith(builtin: true),
+      PluginManifest.fromJsonString(_cmsV10).copyWith(builtin: true),
+      PluginManifest.fromJsonString(_tvboxApi).copyWith(builtin: true),
     ];
 
-/// 初始站点：每个内置插件都挂一个站点实例。
+/// 初始站点：两个内置插件各挂一个占位站点；必填配置留空，避免首次启动误请求。
 List<SiteBinding> seedSites() {
   final now = DateTime.now();
   return [
     SiteBinding(
-      id: 'site_prism',
-      pluginId: 'poqi.demo.prism',
-      name: '棱镜主站',
-      baseUrl: 'https://demo.poqi.local',
+      id: 'site_cms_v10',
+      pluginId: 'poqi.cms.v10',
+      name: '苹果CMS 示例',
+      baseUrl: 'https://example.com',
       order: 0,
-      config: const {'apiKey': '', 'area': '全部', 'adFree': 'true'},
-      notes: '默认综合源',
+      config: const {'api': '', 'ua': ''},
+      notes: '填写接口地址后启用',
       createdAt: now,
       updatedAt: now,
     ),
     SiteBinding(
-      id: 'site_tide',
-      pluginId: 'poqi.demo.tide',
-      name: '潮汐影库',
-      baseUrl: 'https://tide.poqi.local',
+      id: 'site_tvbox_api',
+      pluginId: 'poqi.tvbox.api',
+      name: 'TVBox 示例',
+      baseUrl: 'https://example.com',
       order: 1,
-      config: const {'token': '', 'quality': '自动'},
-      createdAt: now,
-      updatedAt: now,
-    ),
-    SiteBinding(
-      id: 'site_owl',
-      pluginId: 'poqi.demo.nightowl',
-      name: '夜枭放映室',
-      baseUrl: 'https://owl.poqi.local',
-      order: 2,
-      config: const {'cookie': '', 'signKey': ''},
-      createdAt: now,
-      updatedAt: now,
-    ),
-    SiteBinding(
-      id: 'site_atlas',
-      pluginId: 'poqi.demo.atlas',
-      name: '图鉴资料馆',
-      baseUrl: 'https://atlas.poqi.local',
-      order: 3,
-      config: const {'token': ''},
+      config: const {'interface': '', 'siteKey': '', 'ua': ''},
+      notes: '填写接口 JSON 地址后启用',
       createdAt: now,
       updatedAt: now,
     ),

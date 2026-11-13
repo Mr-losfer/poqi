@@ -1,0 +1,214 @@
+name: Release
+
+# 只有两个发布目标：Android（通用 APK）与 Windows（x64 zip）。
+# 本地脚本 tool/release.sh 会 bump 版本并打 tag，推 tag 即触发本工作流。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.24.5'
+
+jobs:
+  # ── Android：通用 APK ──────────────────────────────────────────────────────
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: 解析版本号
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            VERSION=$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' pubspec.yaml | head -1)
+          fi
+          echo "版本：$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # 签名密钥随仓库提交，保证 CI 与本地构建签名一致，用户才能覆盖安装更新
+      - name: 校验签名密钥
+        run: |
+          test -f android/app/poqi-release.jks || { echo "缺少 android/app/poqi-release.jks"; exit 1; }
+          test -f android/key.properties     || { echo "缺少 android/key.properties"; exit 1; }
+
+      - name: 依赖与测试
+        run: |
+          flutter pub get
+          flutter test
+
+      # 使用通用包而非 split-per-abi：应用内更新按第一个 .apk 资源下载，
+      # 单包可避免下载到与设备 ABI 不匹配的安装包。
+      - name: 构建 APK
+        run: flutter build apk --release
+
+      - name: 重命名
+        run: |
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             "out/poqi-${{ steps.meta.outputs.version }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── Windows：整个 Release 目录打包成 zip ───────────────────────────────────
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: 解析版本号
+        id: meta
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            VERSION=$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' pubspec.yaml | head -1)
+          fi
+          echo "版本：$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Windows 上 flutter test 常因路径分隔符 / 平台差异误报，
+      # 测试已由 android job 覆盖，这里只构建。
+      - name: 依赖
+        run: flutter pub get
+
+      - name: 构建 Windows
+        run: flutter build windows --release
+
+      - name: 打包 zip
+        shell: pwsh
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          $stage = "out/poqi-$version-windows-x64"
+          New-Item -ItemType Directory -Force -Path "out" | Out-Null
+          Copy-Item -Path "build/windows/x64/runner/Release" -Destination $stage -Recurse
+          Compress-Archive -Path $stage -DestinationPath "out/poqi-$version-windows-x64.zip" -CompressionLevel Optimal
+          Get-Item "out/poqi-$version-windows-x64.zip" | Format-List Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: out/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── 汇总：一次创建 Release，附 apk + zip + SHA256SUMS.txt + version.json ───
+  release:
+    name: Publish Release
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 生成校验清单与 version.json
+        env:
+          VERSION: ${{ needs.android.outputs.version }}
+        run: |
+          ls -lh dist
+          python3 - <<'PY'
+          import datetime, hashlib, json, os
+
+          version = os.environ['VERSION']
+          owner, repo = os.environ['GITHUB_REPOSITORY'].split('/')
+
+          # apk 在前、zip 在后，与资产命名保持一致
+          order = {'.apk': 0, '.zip': 1}
+          files = sorted(
+              (f for f in os.listdir('dist') if f.endswith(('.apk', '.zip'))),
+              key=lambda f: (order.get(os.path.splitext(f)[1], 9), f),
+          )
+          if not files:
+              raise SystemExit('dist 下没有 apk / zip 产物')
+
+          def digest(path):
+              h = hashlib.sha256()
+              with open(path, 'rb') as fh:
+                  for chunk in iter(lambda: fh.read(1 << 20), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          assets, sums = [], []
+          for name in files:
+              path = os.path.join('dist', name)
+              sha = digest(path)
+              assets.append({
+                  'name': name,
+                  'url': f'https://github.com/{owner}/{repo}/releases/download/v{version}/{name}',
+                  'size': os.path.getsize(path),
+                  'sha256': sha,
+              })
+              sums.append(f'{sha}  {name}')
+          with open('dist/SHA256SUMS.txt', 'w') as fh:
+              fh.write('\n'.join(sums) + '\n')
+          print('\n'.join(sums))
+
+          # 保留仓库里已有的更新说明，只刷新版本与资产列表
+          manifest = {}
+          if os.path.exists('version.json'):
+              manifest = json.load(open('version.json'))
+          manifest.update({
+              'version': version,
+              'tag': f'v{version}',
+              'channel': manifest.get('channel', 'stable'),
+              'notes': manifest.get('notes', ''),
+              'publishedAt': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'htmlUrl': f'https://github.com/{owner}/{repo}/releases/tag/v{version}',
+              'assets': assets,
+          })
+          with open('dist/version.json', 'w') as fh:
+              json.dump(manifest, fh, ensure_ascii=False, indent=2)
+              fh.write('\n')
+          PY
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.android.outputs.version }}
+          name: Poqi ${{ needs.android.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/*.apk
+            dist/*.zip
+            dist/SHA256SUMS.txt
+            dist/version.json

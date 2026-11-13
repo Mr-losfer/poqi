@@ -9,6 +9,7 @@ import '../data/sync/sync_server.dart';
 import '../data/update/updater.dart';
 import '../domain/models/release.dart';
 import '../domain/models/sync.dart';
+import 'home_search.dart';
 import 'providers.dart';
 
 class ConnectState {
@@ -139,7 +140,12 @@ class ConnectController extends Notifier<ConnectState> {
       final server = McpServer(
         backend: backend,
         deviceName: settings.deviceName.isEmpty ? backend.deviceName : settings.deviceName,
-        pin: state.pin,
+        // MCP 直接写仓库，不经过 notifier；写完通知一次，界面才不会停在旧数据上。
+        onMutated: () {
+          ref.invalidate(pluginsProvider);
+          ref.invalidate(sitesProvider);
+          ref.invalidate(homeProvider);
+        },
       );
       final actual = await server.start(port);
       _mcp = server;

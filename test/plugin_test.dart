@@ -124,9 +124,8 @@ void main() {
 
   group('演示引擎', () {
     test('首页与详情可运行', () async {
-      final plugin = builtinPlugins().first;
       final site = seedSites().first;
-      final runner = DemoRunner(plugin: plugin, site: site);
+      final runner = DemoRunner(plugin: _demoPlugin, site: site);
 
       final home = await runner.home();
       expect(home.items, isNotEmpty);
@@ -142,7 +141,7 @@ void main() {
     });
 
     test('搜索命中演示片库', () async {
-      final runner = DemoRunner(plugin: builtinPlugins().first, site: seedSites().first);
+      final runner = DemoRunner(plugin: _demoPlugin, site: seedSites().first);
       final page = await runner.search('长夜');
       expect(page.items, isNotEmpty);
       expect(page.items.first.title.contains('长夜'), isTrue);
@@ -184,3 +183,13 @@ void main() {
 class ExprContextStub {
   static final base = ExprContext(vars: const {});
 }
+
+
+/// 演示引擎仍保留在 lib 中，但不再作为内置插件分发；测试用最小夹具驱动它。
+const _demoPlugin = PluginManifest(
+  id: 'poqi.demo.fixture',
+  name: '演示夹具',
+  version: '1.0.0',
+  engine: PluginEngine.demo,
+  baseUrl: 'https://demo.poqi.local',
+);

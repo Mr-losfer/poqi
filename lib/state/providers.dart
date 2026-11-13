@@ -154,6 +154,36 @@ final enabledSitesProvider = Provider<List<SiteBinding>>((ref) {
   return ref.watch(sitesProvider).where((e) => e.enabled).toList();
 });
 
+/// 当前锁定的站点，null 表示「全部站点」聚合模式。
+///
+/// 顶栏的站点切换器写它；首页、分类、搜索都读它，
+/// 这样"我只看这一个站"的意图在全应用一致。
+final selectedSiteProvider = StateProvider<String?>((ref) => null);
+
+/// 实际参与聚合的站点：受 [selectedSiteProvider] 约束，但站点被禁用或删除时自动回落。
+final activeSitesProvider = Provider<List<SiteBinding>>((ref) {
+  final sites = ref.watch(enabledSitesProvider);
+  final id = ref.watch(selectedSiteProvider);
+  if (id == null) return sites;
+  final hit = sites.where((s) => s.id == id).toList();
+  if (hit.isNotEmpty) return hit;
+
+  // 选中的站点已不可用：延后一帧清空选择，避免在 build 期间改状态。
+  final notifier = ref.read(selectedSiteProvider.notifier);
+  Future.microtask(() => notifier.state = null);
+  return sites;
+});
+
+/// 当前选中的站点对象（null 表示全部）。
+final selectedSiteNameProvider = Provider<SiteBinding?>((ref) {
+  final id = ref.watch(selectedSiteProvider);
+  if (id == null) return null;
+  for (final s in ref.watch(enabledSitesProvider)) {
+    if (s.id == id) return s;
+  }
+  return null;
+});
+
 /// 站点 → 执行器（随插件与站点变化自动重建）。插件缺失时返回 null。
 final runnerFactoryProvider = Provider<SiteRunner? Function(SiteBinding)>((ref) {
   ref.watch(pluginsProvider);

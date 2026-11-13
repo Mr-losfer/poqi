@@ -2,6 +2,9 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // flutter_js 的 Android 实现把 QuickJS 放在 jitpack 上
+        // （com.github.fast-development.android-js-runtimes）
+        maven { url "https://jitpack.io" }
     }
 }
 

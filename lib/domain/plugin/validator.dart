@@ -27,7 +27,8 @@ class PluginValidator {
         path: 'version',
       ));
     }
-    if (p.engine == PluginEngine.http && p.baseUrl.trim().isEmpty) {
+    final isJs = p.engine == PluginEngine.js;
+    if (p.engine != PluginEngine.demo && p.baseUrl.trim().isEmpty) {
       issues.add(const PluginIssue(
         IssueLevel.error,
         'HTTP 插件必须声明 baseUrl',
@@ -121,7 +122,7 @@ class PluginValidator {
           '$path.parse',
           requireIdentity: name != 'play',
         ));
-      } else if (name != 'play') {
+      } else if (name != 'play' && !isJs) {
         issues.add(PluginIssue(
           IssueLevel.error,
           '端点 $name 缺少 parse，无法解析响应',
@@ -141,6 +142,35 @@ class PluginValidator {
       }
     });
 
+    if (isJs) {
+      if (p.script.trim().isEmpty) {
+        issues.add(const PluginIssue(
+          IssueLevel.error,
+          'JS 插件需要 script 字段（脚本全文）',
+          path: 'script',
+        ));
+      } else {
+        // 静态扫一遍脚本，确认端点声明的函数确实存在。
+        // 不做语法解析：真正的语法错误留到试跑时由引擎给出。
+        for (final entry in p.endpoints.entries) {
+          final fn = entry.value.jsFunctionFor(entry.key);
+          final name = RegExp.escape(fn);
+          final pattern = RegExp(
+            r'function\s+' '$name' r'\b'
+            r'|\b' '$name' r'\s*[:=]\s*(async\s*)?function'
+            r'|\b(?:var|let|const)\s+' '$name' r'\s*=',
+          );
+          if (!pattern.hasMatch(p.script)) {
+            issues.add(PluginIssue(
+              IssueLevel.warning,
+              '脚本里没找到函数 $fn()，端点 ${entry.key} 可能无法工作',
+              path: 'endpoints.${entry.key}.js',
+            ));
+          }
+        }
+      }
+    }
+
     if (p.engine == PluginEngine.http && p.headers.isEmpty) {
       issues.add(const PluginIssue(
         IssueLevel.info,
@@ -158,6 +188,19 @@ class PluginValidator {
     bool requireIdentity = true,
   }) {
     final out = <PluginIssue>[];
+    if (parse.format == ParseFormat.split) {
+      final from = (parse.from ?? '').trim();
+      if (from.isEmpty) {
+        out.add(PluginIssue(IssueLevel.error, 'split 解析必须提供 from 表达式', path: '$path.from'));
+      } else {
+        out.addAll(_checkExpr(from, '$path.from'));
+      }
+      final lineNames = (parse.lineNames ?? '').trim();
+      if (lineNames.isNotEmpty) {
+        out.addAll(_checkExpr(lineNames, '$path.lineNames'));
+      }
+      return out;
+    }
     if (parse.format == ParseFormat.html && (parse.root ?? '').trim().isEmpty) {
       out.add(PluginIssue(IssueLevel.error, 'HTML 解析必须提供 root 选择器', path: path));
     }

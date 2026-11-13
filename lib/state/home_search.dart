@@ -37,7 +37,8 @@ final homeProvider = FutureProvider<HomeData>((ref) async {
   ref.watch(pluginsProvider);
   final backend = ref.watch(backendProvider);
 
-  final sites = backend.enabledSites();
+  // 顶栏的站点切换会改变这里的输入，从而只聚合被选中的站点。
+  final sites = ref.watch(activeSitesProvider);
   final failures = <String>[];
   final all = <MediaItem>[];
 
@@ -184,7 +185,7 @@ class SearchController extends Notifier<SearchState> {
     }
 
     final backend = ref.read(backendProvider);
-    final sites = backend.enabledSites().where((s) {
+    final sites = ref.read(activeSitesProvider).where((s) {
       final p = backend.pluginOf(s);
       return p != null && p.supportsSearch;
     }).toList();
