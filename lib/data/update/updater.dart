@@ -56,7 +56,8 @@ class UpdateService {
 
   static const proxyPrefix = 'https://gh-proxy.com/';
 
-  String get _apiLatest => 'https://api.github.com/repos/losfer/poqi/releases/latest';
+  /// 未取到发布页链接时的兜底地址，与设置里的默认仓库保持同源。
+  static String get _repoSlug => const AppSettings().repoSlug;
 
   Future<String> currentVersion() async {
     final info = await PackageInfo.fromPlatform();
@@ -224,7 +225,8 @@ class UpdateService {
 
   Future<void> install(File file) async {
     if (kIsWeb) {
-      await launchUrl(Uri.parse('https://github.com/losfer/poqi/releases'), mode: LaunchMode.externalApplication);
+      await launchUrl(Uri.parse('https://github.com/${_repoSlug}/releases'),
+          mode: LaunchMode.externalApplication);
       return;
     }
     if (Platform.isAndroid) {
@@ -238,7 +240,7 @@ class UpdateService {
   }
 
   Future<void> openReleasePage(String url) async {
-    final target = url.isNotEmpty ? url : 'https://github.com/losfer/poqi/releases';
+    final target = url.isNotEmpty ? url : 'https://github.com/$_repoSlug/releases';
     await launchUrl(Uri.parse(target), mode: LaunchMode.externalApplication);
   }
 }

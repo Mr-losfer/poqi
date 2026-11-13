@@ -7,7 +7,7 @@
 #   ./tool/release.sh 1.1.0 "说明" --no-build    # 复用已有 APK，只做清单与发布
 #
 # 可选环境变量：
-#   POQI_OWNER   仓库所有者，默认 losfer
+#   POQI_OWNER   仓库所有者，默认 Mr-losfer
 #   POQI_REPO    仓库名，默认 poqi
 #
 # 依赖：flutter、git、python3、sha256sum（macOS 自带 shasum）；--push 需已登录的 gh
@@ -25,7 +25,7 @@ for arg in "${@:3}"; do
   esac
 done
 
-REPO_OWNER="${POQI_OWNER:-losfer}"
+REPO_OWNER="${POQI_OWNER:-Mr-losfer}"
 REPO_NAME="${POQI_REPO:-poqi}"
 
 if [[ -z "$VERSION" ]]; then
