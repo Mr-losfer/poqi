@@ -35,7 +35,6 @@ class _PluginsPageState extends ConsumerState<PluginsPage> {
               ),
               child: PqContent(
                 child: PqPageHeader(
-                  eyebrow: 'STUDIO',
                   title: '插件工坊',
                   subtitle: compact ? null : '一套规则，多处复用；站点各自持有配置',
                 ),

@@ -297,15 +297,15 @@ class PqPageHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // M3 没有 "eyebrow" 这种元件；保留参数只为兼容旧调用，
+                // 渲染成标准的 labelMedium，不再全大写、不再拉字距。
                 if (eyebrow != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
-                      eyebrow!.toUpperCase(),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: scheme.primary,
-                        letterSpacing: 1.2,
-                        fontWeight: FontWeight.w600,
+                      eyebrow!,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ),

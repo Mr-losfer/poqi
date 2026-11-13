@@ -77,7 +77,9 @@ jobs:
   # ── Windows：整个 Release 目录打包成 zip ───────────────────────────────────
   windows:
     name: Windows x64
-    runs-on: windows-latest
+    # 固定 2022 镜像：Flutter 3.24 的 CMake generator 表只认 VS 17，
+    # 镜像漂移到更高版本时会回退到 "Visual Studio 16 2019" 而直接失败。
+    runs-on: windows-2022
     timeout-minutes: 40
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -103,6 +105,19 @@ jobs:
 
       # Windows 上 flutter test 常因路径分隔符 / 平台差异误报，
       # 测试已由 android job 覆盖，这里只构建。
+      # 出问题时先看这一行，比翻 CMake 报错快得多
+      - name: 诊断 Visual Studio
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            & $vswhere -latest -products * -property installationVersion
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          } else {
+            Write-Host "vswhere 不存在"
+          }
+          flutter doctor -v
+
       - name: 依赖
         run: flutter pub get
 
@@ -206,7 +221,7 @@ jobs:
           name: Poqi ${{ needs.android.outputs.version }}
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
           files: |
             dist/*.apk
             dist/*.zip
