@@ -483,6 +483,30 @@ var pq = (function () {
     };
   }
 
+  // 表单/JSON 的 Content-Type 要猜一下：对象按 JSON，字符串按 urlencoded。
+  // 猜错的话服务端会收到带引号的 JSON 字符串，非常难排查。
+  function withFormHeaders(opts, body) {
+    var o = opts || {};
+    var headers = {};
+    var k;
+    if (o.headers) {
+      for (k in o.headers) {
+        if (Object.prototype.hasOwnProperty.call(o.headers, k)) headers[k] = o.headers[k];
+      }
+    }
+    var hasCt = false;
+    for (k in headers) {
+      if (Object.prototype.hasOwnProperty.call(headers, k) && k.toLowerCase() === 'content-type') hasCt = true;
+    }
+    if (!hasCt && body !== null && body !== undefined) {
+      var isObj = typeof body === 'object';
+      headers['Content-Type'] = isObj
+        ? 'application/json'
+        : 'application/x-www-form-urlencoded';
+    }
+    return { headers: headers, timeout: o.timeout };
+  }
+
   function parseJsonText(t) {
     if (!t) return null;
     try { return JSON.parse(String(t)); } catch (e) { return null; }
@@ -497,10 +521,10 @@ var pq = (function () {
       return dispatch(url, 'GET', null, opts).body;
     },
     post: function (url, body, opts) {
-      return dispatch(url, 'POST', body, opts).body;
+      return dispatch(url, 'POST', body, withFormHeaders(opts, body)).body;
     },
     put: function (url, body, opts) {
-      return dispatch(url, 'PUT', body, opts).body;
+      return dispatch(url, 'PUT', body, withFormHeaders(opts, body)).body;
     },
     del: function (url, opts) {
       return dispatch(url, 'DELETE', null, opts).body;
