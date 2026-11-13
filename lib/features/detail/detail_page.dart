@@ -12,7 +12,6 @@ import '../../domain/models/media.dart';
 import '../../domain/models/site.dart';
 import '../../state/player.dart';
 import '../../state/providers.dart';
-import '../media/nav.dart';
 
 class DetailPage extends ConsumerStatefulWidget {
   const DetailPage({super.key, required this.siteId, required this.itemId});

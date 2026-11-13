@@ -570,7 +570,7 @@ class DemoRunner implements SiteRunner {
     final hits = DemoCatalog.items.where((e) {
       return e.title.toLowerCase().contains(k) ||
           (e.actors ?? '').toLowerCase().contains(k) ||
-          (e.kind ?? '').toLowerCase().contains(k);
+          e.kind.toLowerCase().contains(k);
     }).toList();
     return MediaPage(items: hits.map(_decorate).toList(), page: page, hasMore: false);
   }

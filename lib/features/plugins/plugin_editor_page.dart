@@ -9,7 +9,6 @@ import '../../core/design/pq_theme.dart';
 import '../../core/ui/adaptive.dart';
 import '../../core/ui/overlay.dart';
 import '../../core/ui/primitives.dart';
-import '../../core/ui/states.dart';
 import '../../data/repositories.dart';
 import '../../domain/models/media.dart';
 import '../../domain/models/plugin.dart';

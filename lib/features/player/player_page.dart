@@ -8,7 +8,6 @@ import 'package:video_player/video_player.dart';
 
 import '../../core/design/pq_theme.dart';
 import '../../core/ui/adaptive.dart';
-import '../../core/ui/motion.dart';
 import '../../core/ui/poster.dart';
 import '../../core/ui/primitives.dart';
 import '../../state/player.dart';
@@ -122,7 +121,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
     final ps = ref.watch(playerProvider);
     final notifier = ref.read(playerProvider.notifier);
 

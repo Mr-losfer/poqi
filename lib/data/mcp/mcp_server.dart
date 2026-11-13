@@ -8,7 +8,6 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
 import '../../domain/models/plugin.dart';
-import '../../domain/plugin/diff.dart';
 import '../../domain/plugin/validator.dart';
 import '../backend.dart';
 
