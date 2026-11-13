@@ -8,6 +8,8 @@ Poqi 是一个可编程的影视聚合器：**插件 = 一套声明式规则，�
 
 包名 `cn.losfer.Poqi` · 目标平台 Android / Windows / Linux（平板与桌面自适应） · 无需 iOS。
 
+**[下载最新版 APK](https://github.com/Mr-losfer/poqi/releases/latest)** · Android 7.0+ · 56 MB 通用包（arm64 / armv7 / x86_64）
+
 ---
 
 ## 功能地图
@@ -31,7 +33,7 @@ Poqi 是一个可编程的影视聚合器：**插件 = 一套声明式规则，�
 ```bash
 flutter pub get
 flutter run -d <device>
-flutter test          # 25 个单元测试：表达式 / 解析 / 补丁 / 演示引擎
+flutter test          # 29 个测试：表达式 / 解析 / 补丁 / 演示引擎 / 端到端冒烟
 ```
 
 构建安装包：
@@ -136,13 +138,14 @@ Content-Type: application/json
 发布流程（本地）：
 
 ```bash
-./tool/release.sh 1.1.0 "支持弹幕"    # 构建 APK、写 version.json、打 tag
-git push origin main --tags
-gh release create v1.1.0 build/app/outputs/flutter-apk/app-release.apk \
-  -t "Poqi 1.1.0" -n "支持弹幕"
+./tool/release.sh 1.1.0 "支持弹幕" --push   # 构建 → 写 version.json → 提交 → 打 tag → 推送 → 发 Release
 ```
 
 CI 见 `.github/workflows/android-release.yml`：推送 `v*` tag 自动构建并创建 Release。
+
+> **签名说明**：`android/app/poqi-release.jks` 与 `android/key.properties` 故意纳入版本库，
+> 以保证本地构建与 CI 产出的 APK 使用同一签名 —— 否则换构建环境后，用户无法覆盖安装更新。
+> 若你 fork 并自行分发，请替换为你自己的密钥。
 
 ## 设计说明
 
