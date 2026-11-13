@@ -6,6 +6,7 @@ import '../../core/ui/adaptive.dart';
 import '../../core/ui/overlay.dart';
 import '../../core/ui/primitives.dart';
 import '../../domain/models/plugin.dart';
+import '../../domain/plugin/js/plugin_script.dart';
 import '../../domain/models/site.dart';
 import '../../state/providers.dart';
 import '../shell/pq_shell.dart';
@@ -464,60 +465,234 @@ PopupMenuItem<String> _menuItem(
   );
 }
 
-/// 新建插件的选择结果。
-enum _TemplateKind { declarative, script }
+/// 新建插件时可选的脚本模板。
+enum _ScriptTemplate { html, json, blank }
 
-const String _jsTemplate = r"""
-// Poqi JS 插件骨架
-// ---------------------------------------------------------------------------
-// ctx 里能用：body（原始文本）/ json（自动解析的 JSON）/ url / status
-//            base（站点地址）/ page / keyword / category / id / cfg / vars
-// pq 工具：get css cssAttr select selectAll text attr html abs clean
-//          matchAll first num trim uniq map
-// 返回值：列表端点返回数组，详情返回对象，play 返回 {url}
-// ---------------------------------------------------------------------------
+/// HTML 站点模板：选择器按常见影视站结构写，改几行就能适配自己的站。
+const String _templateHtml = r"""
+// ===========================================================================
+// 我的插件 —— 单文件脚本
+// 整个插件就是这个文件：元信息、请求、解析、输出结构全在这里。
+// 保存后回到插件详情点「试跑」就能验证，不需要重新打包。
+// ===========================================================================
 
-function home(ctx) {
-  // 例：JSON 接口
-  // var list = pq.get(ctx.json, 'data.list', []);
-  // return list.map(function (it) { return { id: it.id, title: it.name }; });
+var plugin = {
+  id: 'custom.mysite',        // 唯一标识，定下来就别改（站点靠它绑定）
+  name: '我的站点',
+  version: '1.0.0',
+  author: '',
+  description: 'HTML 站点：列表 / 分类 / 搜索 / 详情 / 剧集',
+  base: 'https://example.com',
+  headers: {
+    // 'Referer': 'https://example.com/'
+  },
+  config: [
+    // 这里声明的字段会变成「添加站点」时的表单：
+    // { key: 'cookie', label: 'Cookie', type: 'password' },
+    // { key: 'api', label: '接口地址', required: true }
+  ]
+};
 
-  // 例：HTML 站点
-  // return pq.selectAll(ctx.body, '.item').map(function (node) {
-  //   var a = pq.select(node, 'a');
-  //   return {
-  //     id: pq.attr(a, 'href'),
-  //     title: pq.text(a),
-  //     poster: pq.abs(ctx.base, pq.attr(pq.select(node, 'img'), 'src'))
-  //   };
-  // });
+// p 里有什么：
+//   p.base / p.cfg / p.page / p.keyword / p.category / p.filters / p.id / p.site
+// 常用工具：
+//   pq.http.get(url, {headers})   发请求 → 文本（写起来是同步的）
+//   pq.http.json(url)             发请求 → 已解析的对象
+//   pq.selectAll(html, '.item')   取节点数组
+//   pq.select(node, 'a') / pq.text() / pq.attr() / pq.abs(base, href)
+//   pq.css(html, '.title')        直接取文本数组
+//   pq.first(str, /re(.*?)/)      正则取第一个
 
-  return [];
+function home(p) {
+  return list(p, p.base + '/index.php/vod/show/id/1/page/' + p.page + '.html');
 }
 
-function search(ctx) {
-  return home(ctx);
+function category(p) {
+  return list(p, p.base + '/index.php/vod/type/id/' + p.category + '/page/' + p.page + '.html');
 }
 
-function detail(ctx) {
+function search(p) {
+  return list(p, p.base + '/index.php/vod/search/page/' + p.page +
+    '/wd/' + encodeURIComponent(p.keyword) + '.html');
+}
+
+function list(p, url) {
+  var html = pq.http.get(url);
+  var nodes = pq.selectAll(html, '.module-item, .public-list-box');
+  var out = [];
+  for (var i = 0; i < nodes.length; i++) {
+    var n = nodes[i];
+    var a = pq.select(n, 'a');
+    var href = pq.attr(a, 'href');
+    if (!href) continue;
+    var img = pq.select(n, 'img');
+    out.push({
+      id: pq.abs(p.base, href),          // 详情页地址，detail 会原样收到
+      title: pq.text(pq.select(n, '.title, .time-title')) || pq.attr(a, 'title'),
+      poster: pq.abs(p.base, pq.attr(img, 'data-src') || pq.attr(img, 'src')),
+      remarks: pq.text(pq.select(n, '.module-item-note, .public-list-prb'))
+    });
+  }
+  return { list: out, hasMore: out.length > 0 };
+}
+
+function detail(p) {
+  var html = pq.http.get(p.id);
+  var title = pq.css(html, 'h1.title, h1')[0] || '';
+  var pic = pq.cssAttr(html, '.module-item-pic img, .detail-pic img', 'data-src')[0] || '';
+
+  var eps = [];
+  var links = pq.selectAll(html, '.module-play-list a, .playlist a');
+  for (var i = 0; i < links.length; i++) {
+    var href = pq.abs(p.base, pq.attr(links[i], 'href'));
+    if (!href) continue;
+    eps.push({ name: pq.text(links[i]) || ('第' + (i + 1) + '集'), url: href });
+  }
+
   return {
-    id: ctx.id,
-    title: '',
-    intro: '',
-    lines: [
-      // { name: '线路一', episodes: [{ name: '第01集', url: 'https://...' }] }
-    ]
+    id: p.id,
+    title: title,
+    poster: pq.abs(p.base, pic),
+    intro: pq.clean(pq.css(html, '.module-info-introduction, .desc')[0] || ''),
+    lines: eps.length ? [{ name: '线路1', episodes: eps }] : []
   };
 }
 
-function play(ctx) {
-  // id 就是剧集地址时直接回显
-  return { url: ctx.id };
+function play(p) {
+  // p.id 是剧集地址。播放页若还要再解析一次真实地址，就在这里发请求：
+  // var html = pq.http.get(p.id);
+  // return { url: pq.first(html, /"url"\s*:\s*"([^"]+)"/) || p.id };
+  return { url: p.id };
+}
+""";
+
+/// JSON 接口模板：接口地址放在 config 里，一套脚本挂多个站点。
+const String _templateJson = r"""
+// ===========================================================================
+// 我的插件 —— 单文件脚本（JSON 接口）
+// 元信息 + 请求 + 解析全在这一个文件里，没有任何 JSON 规则要填。
+// ===========================================================================
+
+var plugin = {
+  id: 'custom.mysite',
+  name: '我的接口站',
+  version: '1.0.0',
+  author: '',
+  description: 'JSON 接口：列表 / 分类 / 搜索 / 详情 / 剧集',
+  base: 'https://example.com',
+  config: [
+    {
+      key: 'api',
+      label: '接口地址',
+      required: true,
+      hint: 'https://example.com/api'
+    }
+  ]
+};
+
+function api(p) {
+  var a = pq.trim(p.cfg.api || p.base);
+  if (!a) throw new Error('请先在站点设置里填写「接口地址」');
+  return a;
+}
+
+function list(p, params) {
+  var json = pq.http.json(api(p) + '?' + pq.query(params));
+  var raw = (json && (json.data || json.list)) || [];
+  var out = [];
+  for (var i = 0; i < raw.length; i++) {
+    var it = raw[i];
+    out.push({
+      id: String(it.id),
+      title: pq.trim(it.name || it.title),
+      poster: pq.trim(it.pic || it.poster),
+      remarks: pq.trim(it.note || it.remarks)
+    });
+  }
+  return { list: out, hasMore: out.length > 0 };
+}
+
+function home(p) {
+  return list(p, { page: p.page });
+}
+
+function category(p) {
+  return list(p, { type: p.category, page: p.page });
+}
+
+function search(p) {
+  return list(p, { wd: p.keyword, page: p.page });
+}
+
+function detail(p) {
+  var json = pq.http.json(api(p) + '?ac=detail&id=' + encodeURIComponent(p.id));
+  var it = ((json && (json.data || json.list)) || [])[0] || {};
+  return {
+    id: p.id,
+    title: pq.trim(it.name || it.title),
+    poster: pq.trim(it.pic || it.poster),
+    intro: pq.clean(it.desc || it.intro || ''),
+    actors: pq.trim(it.actor || '').split(/[,，\/、]/).filter(function (s) { return s; }),
+    lines: [{ name: '线路1', episodes: episodes(it.episodes || '') }]
+  };
+}
+
+// "第01集$https://a/1.m3u8#第02集$https://a/2.m3u8"
+function episodes(raw) {
+  var out = [];
+  var parts = String(raw || '').split('#');
+  for (var i = 0; i < parts.length; i++) {
+    var seg = pq.trim(parts[i]);
+    if (!seg) continue;
+    var cut = seg.indexOf('$');
+    out.push({
+      name: cut < 0 ? ('第' + (i + 1) + '集') : pq.trim(seg.slice(0, cut)),
+      url: cut < 0 ? seg : pq.trim(seg.slice(cut + 1))
+    });
+  }
+  return out;
+}
+
+function play(p) {
+  return { url: p.id };
+}
+""";
+
+/// 空白模板：只留骨架，适合照着文档自己写。
+const String _templateBlank = r"""
+// 一个 .js 文件就是一个插件。把元信息和四个函数写全就能用。
+
+var plugin = {
+  id: 'custom.mysite',
+  name: '未命名插件',
+  version: '1.0.0',
+  base: 'https://example.com',
+  config: []
+};
+
+// 列表：返回 { list: [{ id, title, poster, remarks }], hasMore }
+function home(p) {
+  return { list: [], hasMore: false };
+}
+
+// 搜索：p.keyword
+function search(p) {
+  return { list: [], hasMore: false };
+}
+
+// 详情：返回 { id, title, poster, intro, lines: [{ name, episodes: [{ name, url }] }] }
+function detail(p) {
+  return { id: p.id, title: '', lines: [] };
+}
+
+// 播放：返回 { url }，p.id 是剧集地址
+function play(p) {
+  return { url: p.id };
 }
 """;
 
 Future<void> _createPlugin(BuildContext context, WidgetRef ref) async {
-  final kind = await showDialog<_TemplateKind>(
+  final kind = await showDialog<_ScriptTemplate>(
     context: context,
     builder: (ctx) => AlertDialog(
       title: const Text('新建插件'),
@@ -528,20 +703,30 @@ Future<void> _createPlugin(BuildContext context, WidgetRef ref) async {
           Card(
             margin: EdgeInsets.zero,
             child: ListTile(
-              leading: const Icon(Icons.data_object),
-              title: const Text('声明式规则'),
-              subtitle: const Text('用 JSON 描述请求与选择器，适合结构规整的 JSON / HTML 站点'),
-              onTap: () => Navigator.of(ctx).pop(_TemplateKind.declarative),
+              leading: const Icon(Icons.web),
+              title: const Text('HTML 站点'),
+              subtitle: const Text('抓网页 + CSS 选择器，最常见的一类'),
+              onTap: () => Navigator.of(ctx).pop(_ScriptTemplate.html),
             ),
           ),
           const SizedBox(height: 8),
           Card(
             margin: EdgeInsets.zero,
             child: ListTile(
-              leading: const Icon(Icons.terminal),
-              title: const Text('JavaScript 脚本'),
-              subtitle: const Text('写函数把响应映射成标准结构，适合结构不规整、需要清洗的站点'),
-              onTap: () => Navigator.of(ctx).pop(_TemplateKind.script),
+              leading: const Icon(Icons.data_object),
+              title: const Text('JSON 接口'),
+              subtitle: const Text('接口返回结构化数据，直接就着字段取'),
+              onTap: () => Navigator.of(ctx).pop(_ScriptTemplate.json),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            margin: EdgeInsets.zero,
+            child: ListTile(
+              leading: const Icon(Icons.code),
+              title: const Text('空白脚本'),
+              subtitle: const Text('只给骨架，自己从零写'),
+              onTap: () => Navigator.of(ctx).pop(_ScriptTemplate.blank),
             ),
           ),
         ],
@@ -556,105 +741,39 @@ Future<void> _createPlugin(BuildContext context, WidgetRef ref) async {
   );
   if (kind == null || !context.mounted) return;
 
-  final now = DateTime.now().millisecondsSinceEpoch.toString();
-  final suffix = now.length > 6 ? now.substring(now.length - 6) : now;
-  final ids = ref.read(pluginsProvider).map((e) => e.id).toSet();
-  var id = 'custom.$suffix';
+  final existing = ref.read(pluginsProvider).map((e) => e.id).toSet();
+  var id = 'custom.${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
   var n = 2;
-  while (ids.contains(id)) {
-    id = 'custom.${suffix}_$n';
+  while (existing.contains(id)) {
+    id = 'custom.${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}_$n';
     n++;
   }
 
-  final template = kind == _TemplateKind.script
-      ? PluginManifest(
-          id: id,
-          name: '未命名插件',
-          version: '1.0.0',
-          engine: PluginEngine.js,
-          baseUrl: 'https://example.com',
-          script: _jsTemplate,
-          endpoints: const {
-            'home': EndpointSpec(
-              request: RequestSpec(path: '/', query: {'page': '{{page}}'}),
-              js: 'home',
-            ),
-            'search': EndpointSpec(
-              request: RequestSpec(path: '/', query: {'wd': '{{keyword}}'}),
-              js: 'search',
-            ),
-            'detail': EndpointSpec(
-              request: RequestSpec(path: '/', query: {'id': '{{id}}'}),
-              js: 'detail',
-            ),
-            'play': EndpointSpec(request: RequestSpec(path: ''), js: 'play'),
-          },
-        )
-      : PluginManifest(
-          id: id,
-          name: '未命名插件',
-          version: '1.0.0',
-          engine: PluginEngine.http,
-          baseUrl: 'https://example.com',
-          endpoints: const {
-            'home': EndpointSpec(
-              request: RequestSpec(path: '/home', query: {'page': '{{page}}'}),
-              parse: ParseSpec(
-                format: ParseFormat.json,
-                root: 'data.list',
-                fields: {
-                  'id': 'item.id',
-                  'title': 'item.title',
-                  'poster': 'item.poster',
-                  'year': 'item.year',
-                  'remarks': 'item.remarks',
-                },
-              ),
-            ),
-            'search': EndpointSpec(
-              request: RequestSpec(
-                path: '/search',
-                query: {'wd': '{{keyword}}', 'page': '{{page}}'},
-              ),
-              parse: ParseSpec(
-                format: ParseFormat.json,
-                root: 'data.list',
-                fields: {
-                  'id': 'item.id',
-                  'title': 'item.title',
-                  'poster': 'item.poster',
-                  'remarks': 'item.remarks',
-                },
-              ),
-            ),
-            'detail': EndpointSpec(
-              request: RequestSpec(path: '/detail', query: {'id': '{{id}}'}),
-              parse: ParseSpec(
-                format: ParseFormat.json,
-                root: 'data',
-                fields: {
-                  'id': 'item.id',
-                  'title': 'item.title',
-                  'poster': 'item.poster',
-                  'intro': 'item.intro',
-                },
-                episodes: ParseSpec(
-                  format: ParseFormat.json,
-                  root: 'data.episodes',
-                  fields: {
-                    'name': 'item.name',
-                    'url': 'item.url',
-                    'line': 'item.line',
-                  },
-                ),
-              ),
-            ),
-          },
-        );
+  final template = switch (kind) {
+    _ScriptTemplate.html => _templateHtml,
+    _ScriptTemplate.json => _templateJson,
+    _ScriptTemplate.blank => _templateBlank,
+  };
+  // 模板里的占位 id 换成真实的，脚本是唯一事实源，必须一致。
+  final script = template.replaceFirst("id: 'custom.mysite'", "id: '$id'");
 
-  await ref.read(pluginsProvider.notifier).save(template, message: '新建插件');
+  PluginManifest manifest;
+  try {
+    manifest = PluginScript.compile(script, fallbackId: id);
+  } catch (e) {
+    manifest = PluginManifest(
+      id: id,
+      name: '未命名插件',
+      version: '1.0.0',
+      engine: PluginEngine.js,
+      source: PluginSource.script,
+      script: script,
+    );
+  }
+
+  await ref.read(pluginsProvider.notifier).save(manifest, message: '新建插件');
   if (!context.mounted) return;
-  await context.push('/plugin/${template.id}/edit');
+  await context.push('/plugin/${manifest.id}/edit');
 }
 
 Future<void> _copyPlugin(

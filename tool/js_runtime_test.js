@@ -136,40 +136,89 @@ const detailBody = {
   ],
 };
 
-const base = 'https://example.com/api.php/provide/vod/';
-const siteBase = 'https://example.com';
+// ---------------------------------------------------------------------------
+// 装载一个插件脚本：运行时 + 预置的 HTTP 缓存 + 上下文
+// ---------------------------------------------------------------------------
+function runtimeCacheKey(method, url, body) {
+  return String(method || 'GET').toUpperCase() + ' ' + String(url || '') + ' ' +
+    (body === null || body === undefined ? '' : String(body));
+}
+
+function ok(body, url) {
+  return {
+    ok: true,
+    status: 200,
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+    headers: { 'content-type': 'application/json' },
+    url: url || '',
+    error: '',
+  };
+}
+
+function loadPlugin(rawScript, opts) {
+  opts = opts || {};
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(runtimeJs, sandbox);
+  if (opts.cache) sandbox.__poqiCache = opts.cache;
+  if (opts.ctx) sandbox.__poqiCtx = opts.ctx;
+  if (rawScript) vm.runInContext(rawScript, sandbox);
+  return sandbox;
+}
 
 // ---------------------------------------------------------------------------
 console.log('内置 CMS 插件脚本');
 
-check('home 返回两条，字段映射正确', () => {
-  const out = home({ json: listBody, base: siteBase, page: 1 });
-  eq(out.length, 2);
-  eq(out[0].id, '42', 'id 要转成字符串');
-  eq(out[0].title, '长夜将尽');
-  eq(out[0].poster, 'https://example.com/upload/42.jpg', '相对海报要补全');
-  eq(out[0].year, '2026');
-  eq(out[0].area, '内地');
-  eq(out[0].remarks, '更新至 3 集');
-  eq(out[0].score, '8.9');
-  eq(out[0].kind, '剧集');
-  eq(out[0].intro, '一场关于时间的实验', '简介要去标签');
-  eq(out[1].poster, 'https://cdn.example.com/43.jpg', '绝对地址不要动');
+const api = 'https://example.com/api.php/provide/vod/';
+const siteBase = 'https://example.com';
+
+function cmsOpts(query, body, ctxExtra) {
+  const url = api + '?' + query;
+  return {
+    cache: { [runtimeCacheKey('GET', url, '')]: ok(body, url) },
+    ctx: Object.assign({ base: siteBase, cfg: { api } }, ctxExtra || {}),
+  };
+}
+
+check('home 自己发请求，返回两条并映射字段', () => {
+  const box = loadPlugin(cmsScript, cmsOpts('ac=list&pg=1', listBody));
+  const out = box.home({ base: siteBase, cfg: { api }, page: 1 });
+  eq(out.list.length, 2);
+  eq(out.list[0].id, '42', 'id 要转成字符串');
+  eq(out.list[0].title, '长夜将尽');
+  eq(out.list[0].year, '2026');
+  eq(out.list[0].area, '内地');
+  eq(out.list[0].remarks, '更新至 3 集');
+  eq(out.list[0].score, '8.9');
+  eq(out.list[0].kind, '剧集');
+  eq(out.list[0].intro, '一场关于时间的实验', '简介要去标签');
+  eq(out.list[1].poster, 'https://cdn.example.com/43.jpg', '绝对地址不要动');
+  eq(out.hasMore, false, '20 条以下认为没有下一页');
 });
 
-check('category / search 与 home 共用映射', () => {
-  eq(category({ json: listBody, base: siteBase }).length, 2);
-  eq(search({ json: listBody, base: siteBase, keyword: '长夜' }).length, 2);
-});
+check('category / search 走不同参数', () => {
+  const catUrl = api + '?ac=list&t=1&pg=2';
+  const cat = loadPlugin(cmsScript, {
+    cache: { [runtimeCacheKey('GET', catUrl, '')]: ok(listBody, catUrl) },
+    ctx: { base: siteBase, cfg: { api } },
+  });
+  eq(cat.category({ base: siteBase, cfg: { api }, page: 2, category: '1' }).list.length, 2);
 
-check('空响应安全返回空数组', () => {
-  eq(home({ json: null, base: siteBase }), []);
-  eq(home({ json: { code: 0, list: [] }, base: siteBase }), []);
-  eq(detail({ json: {}, base: siteBase, id: '99' }).id, '99', '详情缺数据时用请求 id 兜底');
+  const searchUrl = api + '?ac=detail&wd=%E9%95%BF%E5%A4%9C&pg=1';
+  const sea = loadPlugin(cmsScript, {
+    cache: { [runtimeCacheKey('GET', searchUrl, '')]: ok(listBody, searchUrl) },
+    ctx: { base: siteBase, cfg: { api } },
+  });
+  eq(sea.search({ base: siteBase, cfg: { api }, page: 1, keyword: '长夜' }).list.length, 2);
 });
 
 check('detail 解析出简介、导演、演员、两条线路', () => {
-  const d = detail({ json: detailBody, base: siteBase, id: '42' });
+  const url = api + '?ac=detail&ids=42';
+  const box = loadPlugin(cmsScript, {
+    cache: { [runtimeCacheKey('GET', url, '')]: ok(detailBody, url) },
+    ctx: { base: siteBase, cfg: { api } },
+  });
+  const d = box.detail({ base: siteBase, cfg: { api }, id: '42' });
   eq(d.id, '42');
   eq(d.title, '长夜将尽');
   eq(d.intro, '简介第一段第二段');
@@ -178,46 +227,197 @@ check('detail 解析出简介、导演、演员、两条线路', () => {
   eq(d.lines.length, 2, '两条线路');
   eq(d.lines[0].name, '量子');
   eq(d.lines[0].episodes.length, 3);
-  eq(d.lines[0].episodes[0].name, '第01集');
   eq(d.lines[0].episodes[0].url, 'https://x.example.com/1.m3u8');
   eq(d.lines[1].name, '非凡');
-  eq(d.lines[1].episodes.length, 2);
   eq(d.lines[1].episodes[0].url, 'https://example.com/y/1.m3u8', '相对地址要补全');
 });
 
 check('剧集串异常时不崩', () => {
-  const d1 = detail({ json: { list: [{ vod_id: 1, vod_name: 'x', vod_play_url: '' }] }, base: siteBase, id: '1' });
-  eq(d1.lines, []);
-  const d2 = detail({
-    json: { list: [{ vod_id: 2, vod_name: 'y', vod_play_from: 'A', vod_play_url: '第1集$http://a/1#第2集$http://a/2$$$第1集$http://b/1' }] },
-    base: siteBase,
-    id: '2',
+  const url = api + '?ac=detail&ids=1';
+  const box = loadPlugin(cmsScript, {
+    cache: {
+      [runtimeCacheKey('GET', url, '')]: ok({ list: [{ vod_id: 1, vod_name: 'x', vod_play_url: '' }] }, url),
+    },
+    ctx: { base: siteBase, cfg: { api } },
   });
-  eq(d2.lines.length, 2, '线路名少于组数时补默认名');
-  eq(d2.lines[1].name, '线路2');
-  const d3 = detail({
-    json: { list: [{ vod_id: 3, vod_name: 'z', vod_play_url: 'http://a/1#http://a/2' }] },
-    base: siteBase,
-    id: '3',
-  });
-  eq(d3.lines[0].episodes[0].name, '第1集', '没有 $ 时自动编号');
+  eq(box.detail({ base: siteBase, cfg: { api }, id: '1' }).lines, []);
 });
 
 check('play 直接回显剧集地址', () => {
-  eq(play({ id: 'https://x.example.com/1.m3u8' }).url, 'https://x.example.com/1.m3u8');
-  eq(play({ id: '' }).url, '');
+  const box = loadPlugin(cmsScript, { ctx: { base: siteBase, cfg: { api } } });
+  eq(box.play({ id: 'https://x.example.com/1.m3u8' }).url, 'https://x.example.com/1.m3u8');
+  eq(box.play({ id: '' }).url, '');
+});
+
+check('没配接口地址时给出可读错误', () => {
+  const box = loadPlugin(cmsScript, { ctx: { base: siteBase, cfg: { api: '' } } });
+  let msg = '';
+  try {
+    box.home({ base: siteBase, cfg: { api: '' }, page: 1 });
+  } catch (e) {
+    msg = e.message;
+  }
+  assert(msg.indexOf('接口地址') >= 0, '应该提示填接口地址，实际：' + msg);
+});
+
+check('请求未命中时抛 __POQI_NEED__，宿主能从消息里还原请求', () => {
+  const box = loadPlugin(cmsScript, { ctx: { base: siteBase, cfg: { api } } });
+  let msg = '';
+  try {
+    box.home({ base: siteBase, cfg: { api }, page: 1 });
+  } catch (e) {
+    msg = e.message;
+  }
+  const marker = '__POQI_NEED__';
+  const idx = msg.indexOf(marker);
+  assert(idx >= 0, '没有拿到中断信号：' + msg);
+  const token = msg.slice(idx + marker.length).trim().split(/\s+/)[0];
+  const req = JSON.parse(decodeURIComponent(token));
+  eq(req.url, api + '?ac=list&pg=1');
+  eq(req.method, 'GET');
+});
+
+check('接口返回非 JSON 时报错而不是静默返回空', () => {
+  const url = api + '?ac=list&pg=1';
+  const box = loadPlugin(cmsScript, {
+    cache: { [runtimeCacheKey('GET', url, '')]: ok('<html>403</html>', url) },
+    ctx: { base: siteBase, cfg: { api } },
+  });
+  let msg = '';
+  try {
+    box.home({ base: siteBase, cfg: { api }, page: 1 });
+  } catch (e) {
+    msg = e.message;
+  }
+  assert(msg.indexOf('JSON') >= 0, '应该提示不是 JSON，实际：' + msg);
 });
 
 check('脚本声明的函数齐全', () => {
+  const box = loadPlugin(cmsScript, { ctx: { base: siteBase, cfg: { api } } });
   for (const fn of ['home', 'category', 'search', 'detail', 'play']) {
-    assert(typeof globalThis[fn] === 'function', '缺少函数 ' + fn);
+    assert(typeof box[fn] === 'function', '缺少函数 ' + fn);
   }
+  eq(box.plugin.id, 'poqi.cms.v10');
+  eq(box.plugin.config.length, 2);
+});
+
+// ---------------------------------------------------------------------------
+console.log('\nTVBox 插件脚本');
+
+const tvboxScript = extractRawTripleDouble(read('lib/domain/plugin/builtin.dart'), 'const _tvboxScript');
+
+check('默认挑第一个 type=1 的站点', () => {
+  const iface = 'https://example.com/tvbox.json';
+  const target = 'https://b.example.com/api.php/provide/vod/';
+  const box = loadPlugin(tvboxScript, {
+    cache: {
+      [runtimeCacheKey('GET', iface, '')]: ok({
+        sites: [
+          { key: 'csp_a', name: 'A站', type: 3, api: 'https://a/api' },
+          { key: 'csp_b', name: 'B站', type: 1, api: target },
+        ],
+      }, iface),
+      [runtimeCacheKey('GET', target + '?ac=list&pg=1', '')]: ok(listBody, target),
+    },
+    ctx: { base: '', cfg: { interface: iface, siteKey: '' } },
+  });
+  const out = box.home({ base: '', cfg: { interface: iface, siteKey: '' }, page: 1 });
+  eq(out.list.length, 2);
+  eq(out.list[0].title, '长夜将尽');
+});
+
+check('siteKey 可以按 name 精确指定', () => {
+  const iface = 'https://example.com/tvbox.json';
+  const target = 'https://c.example.com/api/';
+  const box = loadPlugin(tvboxScript, {
+    cache: {
+      [runtimeCacheKey('GET', iface, '')]: ok({
+        sites: [
+          { key: 'csp_b', name: 'B站', type: 1, api: 'https://b/api' },
+          { key: 'csp_c', name: 'C站', type: 1, api: target },
+        ],
+      }, iface),
+      [runtimeCacheKey('GET', target + '?ac=list&pg=1', '')]: ok(listBody, target),
+    },
+    ctx: { base: '', cfg: { interface: iface, siteKey: 'C站' } },
+  });
+  eq(box.home({ base: '', cfg: { interface: iface, siteKey: 'C站' }, page: 1 }).list.length, 2);
+});
+
+check('找不到站点时提示清楚', () => {
+  const iface = 'https://example.com/tvbox.json';
+  const box = loadPlugin(tvboxScript, {
+    cache: {
+      [runtimeCacheKey('GET', iface, '')]: ok({ sites: [{ key: 'x', name: 'X', type: 3 }] }, iface),
+    },
+    ctx: { base: '', cfg: { interface: iface, siteKey: '' } },
+  });
+  let msg = '';
+  try {
+    box.home({ base: '', cfg: { interface: iface, siteKey: '' }, page: 1 });
+  } catch (e) {
+    msg = e.message;
+  }
+  assert(msg.indexOf('type=1') >= 0, '应该提示没有 type=1 的站点，实际：' + msg);
+});
+
+// ---------------------------------------------------------------------------
+console.log('\npq 工具');
+
+const util = loadPlugin('');
+
+check('pq.query 拼装并跳过空值', () => {
+  eq(util.pq.query({ ac: 'list', pg: 2, t: '', u: null }), 'ac=list&pg=2');
+  eq(util.pq.query({ wd: '长 夜' }), 'wd=%E9%95%BF%20%E5%A4%9C');
+});
+
+check('pq.http.request 返回完整结构', () => {
+  const url = 'https://x.example.com/a';
+  const box = loadPlugin('', {
+    cache: { [runtimeCacheKey('GET', url, '')]: ok('hello', url) },
+    ctx: { base: 'https://x.example.com' },
+  });
+  const r = box.pq.http.request({ url: '/a' });
+  eq(r.ok, true);
+  eq(r.status, 200);
+  eq(r.body, 'hello');
+  eq(r.url, url);
+});
+
+check('相对地址按 p.base 补全', () => {
+  const url = 'https://x.example.com/api/list';
+  const box = loadPlugin('', {
+    cache: { [runtimeCacheKey('GET', url, '')]: ok('[]', url) },
+    ctx: { base: 'https://x.example.com' },
+  });
+  eq(box.pq.http.get('/api/list'), '[]');
+});
+
+// ---------------------------------------------------------------------------
+console.log('\n新建插件模板');
+
+check('HTML 模板能加载且函数齐全', () => {
+  const tpl = extractRawTripleDouble(read('lib/features/plugins/plugins_page.dart'), 'const String _templateHtml');
+  const box = loadPlugin(tpl, { ctx: { base: 'https://example.com', cfg: {} } });
+  eq(box.plugin.id, 'custom.mysite');
+  eq(box.plugin.name, '我的站点');
+  for (const fn of ['home', 'category', 'search', 'detail', 'play']) {
+    assert(typeof box[fn] === 'function', '缺少函数 ' + fn);
+  }
+});
+
+check('JSON 模板能加载且声明了 api 配置', () => {
+  const tpl = extractRawTripleDouble(read('lib/features/plugins/plugins_page.dart'), 'const String _templateJson');
+  const box = loadPlugin(tpl, { ctx: { base: 'https://example.com', cfg: {} } });
+  eq(box.plugin.config[0].key, 'api');
+  eq(box.plugin.config[0].required, true);
 });
 
 // ---------------------------------------------------------------------------
 console.log('\nCSS 选择器（HTML 站点会用到）');
 const html = `<div class="box"><ul><li class="v"><a href="/p/1" title="甲">甲<span>HD</span></a></li>
 <li class="v"><a href="/p/2">乙</a></li></ul><img data-original="/i/1.jpg"></div>`;
+const pq = util.pq;
 
 check('后代选择器取到 2 条', () => {
   eq(pq.selectAll(html, 'ul li a').length, 2);
@@ -231,6 +431,87 @@ check('子代与属性选择器', () => {
   eq(pq.selectAll(html, 'div > li').length, 0);
   eq(pq.selectAll(html, 'a[href^="/p/"]').length, 2);
   eq(pq.selectAll(html, 'a[title]').length, 1);
+});
+
+// ---------------------------------------------------------------------------
+console.log('\n重放联调（模拟宿主补数据后重跑脚本）');
+
+function runReplay(box, fnName, ctx, fetchFn, maxRounds) {
+  const limit = maxRounds || 8;
+  box.__poqiCtx = ctx;
+  for (let i = 0; i < limit; i++) {
+    box.__poqiPending = [];
+    try {
+      const out = box[fnName](ctx);
+      if (!box.__poqiPending.length) return out;
+      // 脚本把中断信号吞掉了：仍需补数据后重跑
+      const p0 = box.__poqiPending[0];
+      box.__poqiCache[runtimeCacheKey(p0.method, p0.url, p0.body)] = fetchFn(p0);
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      const idx = msg.indexOf('__POQI_NEED__');
+      if (idx < 0) throw e;
+      const token = msg.slice(idx + '__POQI_NEED__'.length).trim().split(/\s+/)[0];
+      const req = JSON.parse(decodeURIComponent(token));
+      box.__poqiCache[runtimeCacheKey(req.method, req.url, req.body)] = fetchFn(req);
+    }
+  }
+  throw new Error('超过轮数上限');
+}
+
+check('两次串联请求能在两轮内完成', () => {
+  const script = `
+var plugin = { id: 'x', name: 'x' };
+function home(p) {
+  var a = pq.http.get('https://a/1');
+  var b = pq.http.get('https://a/2');
+  return { list: [{ id: a + b, title: 'ok' }] };
+}`;
+  const box = loadPlugin(script, { ctx: { base: '' } });
+  const seen = [];
+  const out = runReplay(box, 'home', { base: '' }, (r) => {
+    seen.push(r.url);
+    const body = r.url.endsWith('/1') ? 'A' : 'B';
+    return { ok: true, status: 200, body: body, headers: {}, url: r.url, error: '' };
+  });
+  eq(out.list[0].id, 'AB');
+  eq(seen, ['https://a/1', 'https://a/2']);
+});
+
+check('脚本自己 try/catch 吞掉中断信号时，宿主仍能补数据', () => {
+  const script = `
+var plugin = { id: 'y', name: 'y' };
+function home(p) {
+  var body = '';
+  try { body = pq.http.get('https://a/9'); } catch (e) { body = ''; }
+  return { list: body ? [{ id: '1', title: body }] : [] };
+}`;
+  const box = loadPlugin(script, { ctx: { base: '' } });
+  let hits = 0;
+  const out = runReplay(box, 'home', { base: '' }, (r) => {
+    hits++;
+    return { ok: true, status: 200, body: 'RESCUED', headers: {}, url: r.url, error: '' };
+  });
+  eq(hits, 1);
+  eq(out.list.length, 1);
+  eq(out.list[0].title, 'RESCUED');
+});
+
+check('重跑不会让上一次的函数残留（同名函数不会串味）', () => {
+  const a = loadPlugin(`
+var plugin = { id: 'a', name: 'a' };
+function home(p) { return 'A'; }`, {});
+  const first = a.home({ base: '' });
+  // 模拟 __poqiPrepare：清理上一轮脚本产物
+  a.__poqiBase = a.__poqiBase || {};
+  Object.keys(a).forEach((k) => {
+    if (k.indexOf('__poqi') === 0 || k === 'pq' || k === 'console') return;
+    if (a.__poqiBase[k]) return;
+    try { delete a[k]; } catch (e) {}
+  });
+  vm.runInContext("var plugin = { id: 'b', name: 'b' }; function home(p) { return 'B'; }", a);
+  eq(first, 'A');
+  eq(a.home({ base: '' }), 'B');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

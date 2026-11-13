@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:poqi/domain/models/plugin.dart';
 import 'package:poqi/domain/plugin/builtin.dart';
 import 'package:poqi/domain/plugin/expr.dart';
+import 'package:poqi/domain/plugin/js/plugin_script.dart';
 import 'package:poqi/domain/plugin/parse.dart';
 import 'package:poqi/domain/plugin/validator.dart';
 
@@ -199,32 +200,99 @@ void main() {
       expect(warns.any((e) => e.message.contains('detail')), isTrue);
     });
 
-    test('TVBox vars 能按 siteKey 或首个 type=1 选出 api', () async {
+    test('TVBox 改成了单文件脚本，选站逻辑写在脚本里', () {
       final tvbox = builtinPlugins().firstWhere((e) => e.id == 'poqi.tvbox.api');
-      final expr = tvbox.vars['api']!.expr;
-      final sites = [
-        {'key': 'csp_a', 'name': 'A站', 'type': 3, 'api': 'https://a/api'},
-        {'key': 'csp_b', 'name': 'B站', 'type': 1, 'api': 'https://b/api'},
-        {'key': 'csp_c', 'name': 'C站', 'type': 1, 'api': 'https://c/api'},
-      ];
-
-      final picked = await PExpr.eval(
-        expr,
-        ExprContext(vars: {
-          'cfg': {'siteKey': ''},
-          'vars': {'sites': sites},
-        }),
-      );
-      expect(picked, 'https://b/api');
-
-      final byName = await PExpr.eval(
-        expr,
-        ExprContext(vars: {
-          'cfg': {'siteKey': 'C站'},
-          'vars': {'sites': sites},
-        }),
-      );
-      expect(byName, 'https://c/api');
+      expect(tvbox.engine, PluginEngine.js);
+      expect(tvbox.source, PluginSource.script);
+      expect(tvbox.vars, isEmpty, reason: '不再依赖表达式变量，改成脚本里请求');
+      expect(tvbox.config.map((e) => e.key), containsAll(['interface', 'siteKey', 'ua']));
+      // 选中站点：先按 key/name 精确匹配，再退回第一个 type=1。
+      expect(tvbox.script, contains('type === 1'));
+      expect(tvbox.script, contains('sites[i].key === key'));
+      expect(tvbox.script, contains('pq.http.get'));
     });
+
+
+  group('脚本元信息静态解析', () {
+    test('内置脚本能被静态解析出名字与配置', () {
+      for (final p in builtinPlugins()) {
+        final meta = PluginScript.lightMeta(p.script);
+        expect(meta, isNotNull, reason: '${p.id} 的 var plugin 没解析出来');
+        expect(meta!['name'], p.name);
+        expect(meta['config'], isA<List>());
+        final fns = PluginScript.scanFunctions(p.script);
+        expect(fns, containsAll(['home', 'search', 'detail', 'play']));
+      }
+    });
+
+    test('用户脚本：字段、headers、配置类型都能读出来', () {
+      const script = r"""
+var plugin = {
+  id: 'x.y',
+  name: '测试 站',
+  version: '2.0.0',
+  base: 'https://a.com',
+  headers: { 'User-Agent': 'UA', 'Referer': 'https://a.com/' },
+  config: [
+    { key: 'cookie', label: 'Cookie', type: 'password' },
+    { key: 'q', label: '清晰度', type: 'select', options: ['1080', '720'] }
+  ]
+};
+function home(p) { return { list: [] }; }
+function search(p) { return { list: [] }; }
+""";
+      final m = PluginScript.compile(script);
+      expect(m.id, 'x.y');
+      expect(m.name, '测试 站');
+      expect(m.version, '2.0.0');
+      expect(m.baseUrl, 'https://a.com');
+      expect(m.headers['User-Agent'], 'UA');
+      expect(m.config.length, 2);
+      expect(m.config[0].secret, isTrue, reason: 'password 类型自动打码');
+      expect(m.config[1].options, ['1080', '720']);
+      expect(m.endpoints.keys, containsAll(['home', 'search']));
+      expect(m.endpoints.containsKey('detail'), isFalse);
+      expect(m.source, PluginSource.script);
+    });
+
+    test('缺 home / search 时明确报错', () {
+      const script = r"""
+var plugin = { id: 'x', name: 'x' };
+function detail(p) { return {}; }
+""";
+      expect(
+        () => PluginScript.compile(script),
+        throwsA(isA<Exception>()),
+      );
+    });
+
+    test('没写 id 时按名字生成稳定 id', () {
+      const a = 'var plugin = { name: "同一个名字" }; function home(p) { return []; }';
+      const b = 'var plugin = { name: "同一个名字" }; function home(p) { return []; }';
+      final id1 = PluginScript.compile(a).id;
+      final id2 = PluginScript.compile(b).id;
+      expect(id1, id2);
+      expect(id1, startsWith('custom.'));
+    });
+
+    test('注释和尾逗号不影响解析', () {
+      const script = r"""
+// 头部注释
+var plugin = {
+  id: 'c.d',        // 行内注释
+  name: 'C',
+  /* 块注释
+     跨行 */
+  config: [
+    { key: 'a', label: 'A' },
+  ],
+};
+function home(p) { return { list: [] }; }
+""";
+      final m = PluginScript.compile(script);
+      expect(m.id, 'c.d');
+      expect(m.config.single.key, 'a');
+    });
+  });
   });
 }

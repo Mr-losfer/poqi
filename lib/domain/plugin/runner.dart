@@ -7,6 +7,7 @@ import '../models/plugin.dart';
 import '../models/site.dart';
 import 'demo_catalog.dart';
 import 'expr.dart';
+import 'js/js_bridge.dart';
 import 'js/js_host.dart';
 import 'js/js_normalize.dart';
 import 'parse.dart';
@@ -103,6 +104,10 @@ class HttpSiteRunner implements SiteRunner {
   final PqHttp http;
   final VarCache varCache;
 
+  /// JS 脚本的网络桥：`pq.http.get()` 的请求最终从这里发出。
+  /// 挂在 runner 上，list → detail → play 之间就能复用同一份响应缓存。
+  late final JsReplaySession jsSession = JsReplaySession(fetch: _fetchForJs);
+
   String get baseUrl =>
       site.baseUrl.trim().isNotEmpty ? site.baseUrl.trim() : plugin.baseUrl.trim();
 
@@ -125,6 +130,27 @@ class HttpSiteRunner implements SiteRunner {
   }
 
   Map<String, Object?> _cfgMap() => Map<String, Object?>.from(site.config);
+
+  /// 脚本发起的请求：加上插件的公共 headers，失败也返回结果（让脚本自己兜底）。
+  Future<JsHttpResult> _fetchForJs(JsHttpRequest req) async {
+    try {
+      final resp = await http.request(
+        url: req.url,
+        method: req.method,
+        headers: {...plugin.headers, ...req.headers},
+        body: req.body,
+        timeoutMs: req.timeoutMs,
+      );
+      return JsHttpResult(
+        status: resp.statusCode,
+        body: resp.body,
+        headers: resp.headers,
+        finalUrl: resp.finalUrl,
+      );
+    } catch (e) {
+      return JsHttpResult.failure('$e');
+    }
+  }
 
   /// 解析全部 vars（按需计算）。返回 name → value。
   Future<Map<String, Object?>> _vars() async {
@@ -223,13 +249,14 @@ class HttpSiteRunner implements SiteRunner {
   }
 
   /// 把 Dart 侧的上下文交给 JS 函数，返回脚本产出的裸结构。
-  Object? _callJs(
+  Future<Object?> _callJs(
     EndpointSpec ep,
     String endpoint,
     ExprContext ctx,
     PqHttpResponse resp,
   ) {
     return JsHost.call(
+      session: jsSession,
       pluginId: plugin.id,
       script: plugin.script,
       function: ep.jsFunctionFor(endpoint),
@@ -249,17 +276,19 @@ class HttpSiteRunner implements SiteRunner {
         'filters': ctx.vars['filters'] ?? const <String, String>{},
         'id': ctx.vars['id'] ?? '',
         'site': {'id': site.id, 'name': site.name},
+        'now': DateTime.now().millisecondsSinceEpoch,
       },
     );
   }
 
-  Object? _callJsPlay(
+  Future<Object?> _callJsPlay(
     EndpointSpec ep,
     ExprContext ctx,
     PqHttpResponse? resp,
     String episodeUrl,
   ) {
     return JsHost.call(
+      session: jsSession,
       pluginId: plugin.id,
       script: plugin.script,
       function: ep.jsFunctionFor('play'),
@@ -280,6 +309,7 @@ class HttpSiteRunner implements SiteRunner {
         // 播放端点里 id 就是剧集地址，脚本可直接返回它。
         'id': episodeUrl,
         'site': {'id': site.id, 'name': site.name},
+        'now': DateTime.now().millisecondsSinceEpoch,
       },
     );
   }
@@ -326,7 +356,9 @@ class HttpSiteRunner implements SiteRunner {
     String? category,
     Map<String, String> filters = const {},
   }) async {
-    final ep = plugin.endpoints[endpointName];
+    // 脚本插件不一定写了 category()，这时退回 home()：分类只是多传一个参数。
+    final ep = plugin.endpoints[endpointName] ??
+        (endpointName == 'category' ? plugin.endpoints['home'] : null);
     if (ep == null) throw PqHttpException('插件未声明 $endpointName 端点');
     final useJs = plugin.engine == PluginEngine.js;
     final parse = ep.parse;
@@ -346,26 +378,37 @@ class HttpSiteRunner implements SiteRunner {
       ...filters,
     };
 
-    final resp = await _send(ep, ctx, extraQuery: query);
-    if (!resp.ok) {
-      throw PqHttpException(
-        'HTTP ${resp.statusCode}',
-        statusCode: resp.statusCode,
-        url: resp.finalUrl,
+    // 脚本插件（request.path 为空）自己发请求，Dart 不再预取。
+    final PqHttpResponse resp;
+    if (useJs && ep.request.path.trim().isEmpty) {
+      resp = PqHttpResponse(
+        statusCode: 200,
+        body: '',
+        headers: const {},
+        finalUrl: baseUrl,
       );
+    } else {
+      resp = await _send(ep, ctx, extraQuery: query);
+      if (!resp.ok) {
+        throw PqHttpException(
+          'HTTP ${resp.statusCode}',
+          statusCode: resp.statusCode,
+          url: resp.finalUrl,
+        );
+      }
     }
 
     if (useJs) {
-      final raw = _callJs(ep, endpointName, ctx, resp);
+      final raw = await _callJs(ep, endpointName, ctx, resp);
       final items = JsNormalizer.items(
         raw,
         baseUrl: resp.finalUrl,
         sourceId: site.id,
         sourceName: site.name,
       );
-      final hasMore = ep.pageSize != null
-          ? items.length >= ep.pageSize!
-          : items.length >= 12;
+      final scripted = raw is Map && raw['hasMore'] is bool ? raw['hasMore'] as bool : null;
+      final hasMore = scripted ??
+          (ep.pageSize != null ? items.length >= ep.pageSize! : items.length >= 12);
       return MediaPage(items: items, page: page, hasMore: hasMore);
     }
 
@@ -432,13 +475,23 @@ class HttpSiteRunner implements SiteRunner {
     if (parse == null && !useJs) throw PqHttpException('detail 缺少 parse 配置');
 
     final ctx = await _context(id: id);
-    final resp = await _send(ep, ctx);
-    if (!resp.ok) {
-      throw PqHttpException('HTTP ${resp.statusCode}', statusCode: resp.statusCode, url: resp.finalUrl);
+    final PqHttpResponse resp;
+    if (useJs && ep.request.path.trim().isEmpty) {
+      resp = PqHttpResponse(
+        statusCode: 200,
+        body: '',
+        headers: const {},
+        finalUrl: baseUrl,
+      );
+    } else {
+      resp = await _send(ep, ctx);
+      if (!resp.ok) {
+        throw PqHttpException('HTTP ${resp.statusCode}', statusCode: resp.statusCode, url: resp.finalUrl);
+      }
     }
 
     if (useJs) {
-      final raw = _callJs(ep, 'detail', ctx, resp);
+      final raw = await _callJs(ep, 'detail', ctx, resp);
       final detail = JsNormalizer.detail(
         raw,
         baseUrl: resp.finalUrl,
@@ -567,7 +620,7 @@ class HttpSiteRunner implements SiteRunner {
       }
     }
     if (plugin.engine == PluginEngine.js) {
-      final raw = _callJsPlay(ep, ctx, resp, episodeUrl);
+      final raw = await _callJsPlay(ep, ctx, resp, episodeUrl);
       var playUrl = JsNormalizer.playUrl(raw, fallback: episodeUrl).trim();
       if (playUrl.isEmpty) playUrl = episodeUrl;
       if (!playUrl.startsWith('http') && !playUrl.startsWith('rtmp')) {

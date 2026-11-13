@@ -7,6 +7,7 @@ import '../domain/models/plugin.dart';
 import '../domain/models/settings.dart';
 import '../domain/models/site.dart';
 import '../domain/plugin/builtin.dart';
+import '../domain/plugin/js/plugin_script.dart';
 import '../domain/plugin/diff.dart';
 import 'store.dart';
 
@@ -206,6 +207,16 @@ class PluginRepository {
   }) async {
     final plugin = byId(pluginId);
     if (plugin == null) throw StateError('插件不存在');
+
+    // 单文件脚本插件：补丁直接打在脚本源码上。
+    // 让 AI 去 diff 一段转义后的 JSON 字符串既难写也难读。
+    if (plugin.source == PluginSource.script) {
+      final text = UnifiedDiff.apply(plugin.script, patch);
+      final next = PluginScript.compile(text, fallbackId: plugin.id);
+      await save(next, message: message);
+      return revisions(pluginId).first;
+    }
+
     final source = plugin.toJsonString();
     final result = UnifiedDiff.apply(source, patch);
     final next = PluginManifest.fromJsonString(result);

@@ -13,6 +13,10 @@ const String pqRuntimeJs = r'''
  * Poqi JS 插件运行时（纯 ES5，无依赖）
  *
  * 插件脚本里可以直接用 `pq.*`：
+ *   pq.http.get(url, opts)        发 GET，返回响应文本（同步写法）
+ *   pq.http.json(url, opts)       GET + JSON.parse
+ *   pq.http.post(url, body, opts) POST，body 可以是对象（自动 JSON）
+ *   pq.http.request({url,...})    返回 {ok,status,headers,body,url,error}
  *   pq.get(obj, 'a.b.0.c', def)   安全取值
  *   pq.text(node) / pq.ownText    取文本
  *   pq.attr(node, 'href')         取属性
@@ -26,7 +30,11 @@ const String pqRuntimeJs = r'''
  *   pq.matchAll(str, re, group)   全局正则
  *   pq.first(str, re, group)      首个正则
  *   pq.num('8.9分') -> 8.9
- *   pq.uniq / pq.trim / pq.pad
+ *   pq.uniq / pq.trim / pq.pad / pq.query / pq.json / pq.log
+ *
+ * 网络说明：脚本是同步求值的，网络是异步的。宿主用「先记账、后重放」
+ * 把两者接起来 —— `pq.http.get()` 在脚本里就是同步返回字符串。
+ * 细节见 js_bridge.dart。
  *
  * CSS 选择器支持：
  *   tag  .class  #id  *  [attr]  [attr=v]  [attr*=v]  [attr^=v]  [attr$=v]
@@ -438,6 +446,123 @@ var pq = (function () {
     return s;
   }
 
+  // ------------------------------------------------------------------ HTTP
+  // 真正的请求由宿主（Dart）发出，脚本侧看到的是「同步」返回。
+  // 机制：命中 __poqiCache 直接给结果；没命中就记录到 __poqiPending 并
+  // 抛出 __POQI_NEED__，宿主请求完成后带着缓存把脚本整体重跑一遍。
+  function gctx() {
+    return (typeof globalThis !== 'undefined' ? globalThis : this).__poqiCtx || {};
+  }
+
+  function toBody(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+
+  function dispatch(url, method, body, opts) {
+    var o = opts || {};
+    var target = trim(String(url === null || url === undefined ? '' : url));
+    if (!target) throw new Error('pq.http：url 不能为空');
+    if (!/^(https?:)?\/\//i.test(target)) target = abs(gctx().base || '', target);
+    var res = (typeof globalThis !== 'undefined' ? globalThis : this).__poqiFetch({
+      url: target,
+      method: String(method || 'GET').toUpperCase(),
+      headers: o.headers || {},
+      body: toBody(body),
+      timeoutMs: o.timeout || 20000
+    });
+    return {
+      ok: res.ok === true,
+      status: res.status || 0,
+      url: res.url || target,
+      headers: res.headers || {},
+      body: res.body === null || res.body === undefined ? '' : String(res.body),
+      error: res.error || ''
+    };
+  }
+
+  function parseJsonText(t) {
+    if (!t) return null;
+    try { return JSON.parse(String(t)); } catch (e) { return null; }
+  }
+
+  var http = {
+    request: function (opts) {
+      var o = opts || {};
+      return dispatch(o.url, o.method || 'GET', o.body, o);
+    },
+    get: function (url, opts) {
+      return dispatch(url, 'GET', null, opts).body;
+    },
+    post: function (url, body, opts) {
+      return dispatch(url, 'POST', body, opts).body;
+    },
+    put: function (url, body, opts) {
+      return dispatch(url, 'PUT', body, opts).body;
+    },
+    del: function (url, opts) {
+      return dispatch(url, 'DELETE', null, opts).body;
+    },
+    json: function (url, opts) {
+      return parseJsonText(dispatch(url, 'GET', null, opts).body);
+    },
+    postJson: function (url, body, opts) {
+      var o = opts || {};
+      var headers = {};
+      var k;
+      if (o.headers) {
+        for (k in o.headers) {
+          if (Object.prototype.hasOwnProperty.call(o.headers, k)) headers[k] = o.headers[k];
+        }
+      }
+      var hasCt = false;
+      for (k in headers) {
+        if (Object.prototype.hasOwnProperty.call(headers, k) && k.toLowerCase() === 'content-type') hasCt = true;
+      }
+      if (!hasCt) headers['Content-Type'] = 'application/json';
+      return parseJsonText(dispatch(
+        url,
+        'POST',
+        typeof body === 'string' ? body : JSON.stringify(body),
+        { headers: headers, timeout: o.timeout }
+      ).body);
+    }
+  };
+
+  function query(obj) {
+    var out = [];
+    for (var k in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+      var v = obj[k];
+      if (v === null || v === undefined || v === '') continue;
+      out.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)));
+    }
+    return out.join('&');
+  }
+
+  function log() {
+    var g = typeof globalThis !== 'undefined' ? globalThis : this;
+    if (!g.__poqiLogs) g.__poqiLogs = [];
+    var parts = [];
+    for (var i = 0; i < arguments.length; i++) {
+      var a = arguments[i];
+      if (typeof a === 'string') {
+        parts.push(a);
+      } else {
+        try { parts.push(JSON.stringify(a)); } catch (e) { parts.push(String(a)); }
+      }
+    }
+    g.__poqiLogs.push(parts.join(' '));
+    if (g.__poqiLogs.length > 200) g.__poqiLogs.shift();
+  }
+
+  function now() {
+    var t = gctx().now;
+    return typeof t === 'number' ? t : Date.now();
+  }
+
   return {
     parseHtml: parseHtml,
     select: select,
@@ -459,9 +584,97 @@ var pq = (function () {
     uniq: uniq,
     map: map,
     pad: pad,
-    decode: decodeEntities
+    decode: decodeEntities,
+    http: http,
+    json: parseJsonText,
+    query: query,
+    log: log,
+    now: now
   };
 })();
+
+// --------------------------------------------------------------- HTTP 桥
+// __poqiCache 跨轮保留（宿主只在请求成功后才写入），
+// __poqiPending 每轮清空，用来判断「这一轮有没有发起新请求」。
+(function () {
+  var g = typeof globalThis !== 'undefined' ? globalThis : this;
+  if (!g.__poqiCache) g.__poqiCache = {};
+  if (!g.__poqiPending) g.__poqiPending = [];
+  if (!g.__poqiLogs) g.__poqiLogs = [];
+})();
+
+function __poqiHttpKey(method, url, body) {
+  return String(method || 'GET').toUpperCase() + ' ' + String(url || '') + ' ' +
+    (body === null || body === undefined ? '' : String(body));
+}
+
+function __poqiFetch(req) {
+  var g = typeof globalThis !== 'undefined' ? globalThis : this;
+  var method = String(req.method || 'GET').toUpperCase();
+  var body = req.body === null || req.body === undefined ? '' : String(req.body);
+  var key = __poqiHttpKey(method, req.url, body);
+  var hit = g.__poqiCache[key];
+  if (hit) return hit;
+
+  var record = {
+    url: String(req.url || ''),
+    method: method,
+    headers: req.headers || {},
+    body: body,
+    timeoutMs: req.timeoutMs || 20000
+  };
+  g.__poqiPending.push(record);
+  // encodeURIComponent 把 JSON 压成不含空白的 ASCII，宿主从报错首行即可还原。
+  throw new Error('__POQI_NEED__' + encodeURIComponent(JSON.stringify(record)));
+}
+
+// ---------------------------------------------------------- 脚本装载 / 收集
+// 每次重放都重新执行一遍脚本，所以要先清掉上一轮的残留：
+//   * __poqiBase 是「首次装载前的全局键快照」，内置函数都在里面，绝不动；
+//   * 不在 base 里的键一律视为脚本产物，装载后收进 __poqi[pluginId]。
+function __poqiPrepare(id) {
+  var g = typeof globalThis !== 'undefined' ? globalThis : this;
+  if (!g.__poqiBase) {
+    var seed = {};
+    var all = Object.keys(g);
+    for (var s = 0; s < all.length; s++) seed[all[s]] = 1;
+    g.__poqiBase = seed;
+  }
+  var base = g.__poqiBase;
+  var keys = Object.keys(g);
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (base[k]) continue;
+    if (k.indexOf('__poqi') === 0) continue;   // 宿主自己的内部状态
+    if (k === 'pq') continue;                  // 运行时本体
+    try { delete g[k]; } catch (e) {
+      try { g[k] = undefined; } catch (e2) {}
+    }
+  }
+  g.__poqi = g.__poqi || {};
+  g.__poqi[id] = {};
+  return 0;
+}
+
+function __poqiCollect(id) {
+  var g = typeof globalThis !== 'undefined' ? globalThis : this;
+  var base = g.__poqiBase || {};
+  var bag = {};
+  var keys = Object.keys(g);
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (base[k]) continue;
+    if (k.indexOf('__poqi') === 0) continue;
+    if (k === 'pq') continue;
+    if (typeof g[k] === 'function') bag[k] = g[k];
+    try { delete g[k]; } catch (e) {
+      try { g[k] = undefined; } catch (e2) {}
+    }
+  }
+  g.__poqi = g.__poqi || {};
+  g.__poqi[id] = bag;
+  return 0;
+}
 
 // ------------------------------------------------------------------ 派发
 function __poqiCall(name, ctx) {
@@ -476,13 +689,22 @@ function __poqiCall(name, ctx) {
 if (typeof globalThis !== 'undefined') {
   globalThis.pq = pq;
   globalThis.__poqiCall = __poqiCall;
+  globalThis.__poqiFetch = __poqiFetch;
+  globalThis.__poqiHttpKey = __poqiHttpKey;
 } else {
   this.pq = pq;
   this.__poqiCall = __poqiCall;
+  this.__poqiFetch = __poqiFetch;
+  this.__poqiHttpKey = __poqiHttpKey;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pq: pq, __poqiCall: __poqiCall };
+  module.exports = {
+    pq: pq,
+    __poqiCall: __poqiCall,
+    __poqiFetch: __poqiFetch,
+    __poqiHttpKey: __poqiHttpKey
+  };
 }
 
 ''';

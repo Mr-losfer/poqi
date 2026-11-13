@@ -36,6 +36,22 @@ enum PluginEngine {
       };
 }
 
+/// 插件的来源形态。
+enum PluginSource {
+  /// 声明式 JSON 清单（老格式，仍然兼容）。
+  json,
+
+  /// 一个 `.js` 文件就是一个插件：元信息 + 逻辑全在脚本里。
+  script;
+
+  static PluginSource parse(String? v) => v == 'script' ? PluginSource.script : PluginSource.json;
+
+  String get label => switch (this) {
+        PluginSource.json => 'JSON 清单',
+        PluginSource.script => '单文件脚本',
+      };
+}
+
 enum ConfigFieldType {
   text,
   password,
@@ -309,6 +325,7 @@ class PluginManifest {
     this.homepage = '',
     this.icon = '',
     this.engine = PluginEngine.http,
+    this.source = PluginSource.json,
     this.script = '',
     this.baseUrl = '',
     this.headers = const {},
@@ -328,6 +345,9 @@ class PluginManifest {
   final String homepage;
   final String? icon;
   final PluginEngine engine;
+
+  /// 插件是 JSON 清单还是单个脚本文件。
+  final PluginSource source;
 
   /// `engine: js` 时的完整脚本（可含多个端点函数）。
   final String script;
@@ -362,6 +382,7 @@ class PluginManifest {
     String? homepage,
     String? icon,
     PluginEngine? engine,
+    PluginSource? source,
     String? script,
     String? baseUrl,
     Map<String, String>? headers,
@@ -381,6 +402,7 @@ class PluginManifest {
       homepage: homepage ?? this.homepage,
       icon: icon ?? this.icon,
       engine: engine ?? this.engine,
+      source: source ?? this.source,
       script: script ?? this.script,
       baseUrl: baseUrl ?? this.baseUrl,
       headers: headers ?? this.headers,
@@ -402,6 +424,7 @@ class PluginManifest {
         if (homepage.isNotEmpty) 'homepage': homepage,
         if (icon != null && icon!.isNotEmpty) 'icon': icon,
         'engine': engine.name,
+        if (source == PluginSource.script) 'source': source.name,
         if (script.isNotEmpty) 'script': script,
         'baseUrl': baseUrl,
         if (headers.isNotEmpty) 'headers': headers,
@@ -426,6 +449,7 @@ class PluginManifest {
       homepage: '${j['homepage'] ?? ''}',
       icon: j['icon'] as String?,
       engine: PluginEngine.parse(j['engine'] as String?),
+      source: PluginSource.parse(j['source'] as String?),
       script: '${j['script'] ?? ''}',
       baseUrl: '${j['baseUrl'] ?? ''}',
       headers: (j['headers'] as Map?)?.map((k, v) => MapEntry('$k', '$v')) ?? const {},

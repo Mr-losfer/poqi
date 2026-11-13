@@ -1,7 +1,7 @@
 name: poqi
 description: "Poqi — 把散落的影像收进一只盒子。局域网 MCP 驱动的影视聚合与插件平台。"
 publish_to: 'none'
-version: 1.1.0+2
+version: 1.2.0+3
 
 environment:
   sdk: ^3.5.4

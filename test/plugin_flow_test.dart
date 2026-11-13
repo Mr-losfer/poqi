@@ -94,7 +94,7 @@ void main() {
     expect(find.text('新建插件'), findsWidgets);
   });
 
-  testWidgets('新建插件 → 选 JavaScript → 真正落库并进入编辑器', (tester) async {
+  testWidgets('新建插件 → 选 HTML 模板 → 真正落库并进入编辑器', (tester) async {
     tester.view.physicalSize = const Size(390 * 2, 844 * 2);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
@@ -105,11 +105,12 @@ void main() {
     await tester.tap(find.text('新建插件').first);
     await settle(tester);
 
-    // 模板选择对话框
-    expect(find.text('JavaScript 脚本'), findsOneWidget);
-    expect(find.text('声明式规则'), findsOneWidget);
+    // 模板选择对话框：三种脚本模板，不再出现 JSON 规则
+    expect(find.text('HTML 站点'), findsOneWidget);
+    expect(find.text('JSON 接口'), findsOneWidget);
+    expect(find.text('空白脚本'), findsOneWidget);
 
-    await tester.tap(find.text('JavaScript 脚本'));
+    await tester.tap(find.text('HTML 站点'));
     await settle(tester, 16);
 
     expect(tester.takeException(), isNull);
@@ -117,9 +118,13 @@ void main() {
     // 1. 数据落库
     final plugins = backend.plugins();
     expect(plugins.length, before + 1, reason: '新插件没有写进仓库');
-    final created = plugins.where((p) => !p.builtin && p.engine == PluginEngine.js).toList();
-    expect(created, hasLength(1), reason: '新建的插件不是 JS 引擎');
+    final created = plugins.where((p) => !p.builtin).toList();
+    expect(created, hasLength(1), reason: '新建的插件没有被识别为自定义插件');
+    expect(created.single.source, PluginSource.script, reason: '应该是单文件脚本形态');
+    expect(created.single.engine, PluginEngine.js);
     expect(created.single.script, contains('function home'));
+    expect(created.single.script, contains('var plugin'));
+    expect(created.single.name, '我的站点', reason: '元信息应从脚本里读出来');
     expect(created.single.endpoints.containsKey('detail'), isTrue);
 
     // 2. 版本记录也写进去了（曾经这里会因为空 before 崩掉）
@@ -129,7 +134,7 @@ void main() {
     expect(find.text('保存'), findsWidgets);
   });
 
-  testWidgets('新建插件 → 选声明式 → 生成的规则通过校验', (tester) async {
+  testWidgets('新建插件 → 选 JSON 接口模板 → config 被解析成表单字段', (tester) async {
     tester.view.physicalSize = const Size(390 * 2, 844 * 2);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
@@ -137,13 +142,15 @@ void main() {
     await openPluginsTab(tester);
     await tester.tap(find.text('新建插件').first);
     await settle(tester);
-    await tester.tap(find.text('声明式规则'));
+    await tester.tap(find.text('JSON 接口'));
     await settle(tester, 16);
 
     expect(tester.takeException(), isNull);
-    final created = backend.plugins().where((p) => !p.builtin && p.engine == PluginEngine.http).toList();
+    final created = backend.plugins().where((p) => !p.builtin).toList();
     expect(created, hasLength(1));
-    expect(created.single.endpoints['home']?.parse, isNotNull);
+    expect(created.single.config.map((e) => e.key), contains('api'));
+    expect(created.single.config.first.required, isTrue);
+    expect(created.single.source, PluginSource.script);
   });
 
   testWidgets('点击插件卡片能进入详情页', (tester) async {

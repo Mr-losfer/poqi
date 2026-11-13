@@ -1,398 +1,487 @@
-# Poqi 插件规范 v1
+# Poqi 插件规范 v2
 
-> 一套规则，多处复用。插件描述"怎么读一个站点"，站点描述"读哪一个站点、用什么凭据"。
+> 一句话：**一个 `.js` 文件就是一个插件**。元信息、请求、解析、输出结构，全在这一个文件里。
+> 没有 JSON 规则要填，没有"先声明端点再写脚本"，写 JS 就是写插件。
+
+---
 
 ## 1. 心智模型
 
 ```
-PluginManifest (规则)  ── 1 : N ──  SiteBinding (站点实例)
-   endpoints / parse            baseUrl / config / 启用状态
+┌─────────────────────────────────────────────┐
+│  my-site.js                                 │
+│                                             │
+│  var plugin = { id, name, config, ... }     │  ← 元信息：叫什么、要用户填什么
+│                                             │
+│  function home(p)      { ... }              │  ← 首页要什么
+│  function search(p)    { ... }              │  ← 搜索要什么
+│  function detail(p)    { ... }              │  ← 详情要什么
+│  function play(p)      { ... }              │  ← 播放地址
+└─────────────────────────────────────────────┘
+                 ↓ 存进「插件」
+          站点 = 插件 + 一组配置值
 ```
 
-- 同一个插件可以被多个站点复用（镜像站、不同域名、不同账号）。
-- 每个站点持有自己的一份 `config`（Cookie、Token、线路偏好…）。
-- 运行时变量 `vars` 由表达式计算，可按 TTL 缓存，用来处理定时轮换的签名/令牌。
+* **插件**是可复用的逻辑（一套代码）。
+* **站点**是插件的一次实例化（一份 `api` / `cookie` 配置 + 一个名字）。
+* 同一个插件可以挂任意多个站点：改个接口地址就是另一个站。
 
-## 2. 根字段
+---
 
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `spec` | int | 是 | 规范版本，当前为 `1` |
-| `id` | string | 是 | 3–64 位小写字母/数字/`.`/`_`/`-`，全局唯一 |
-| `name` | string | 是 | 展示名 |
-| `version` | string | 是 | 语义化版本，同步时用于比较新旧 |
-| `author` / `description` / `homepage` | string | 否 | 元信息 |
-| `icon` | string | 否 | 预留：URL 或字母 |
-| `engine` | `http` \| `demo` | 是 | `demo` 走内置演示数据 |
-| `baseUrl` | string | http 必填 | 站点基地址，站点可覆盖 |
-| `headers` | map | 否 | 全局请求头，常放 UA / Referer |
-| `config` | array | 否 | 站点级配置项声明 |
-| `vars` | map | 否 | 运行时变量 |
-| `endpoints` | map | 是 | 至少一个：home/category/search/detail/play |
-| `notes` | string | 否 | 给使用者看的备注 |
+## 2. 脚本结构
 
-## 3. config：站点级配置
+### 2.1 元信息
 
-```json
-{
-  "key": "cookie",
-  "label": "Cookie",
-  "type": "text",
-  "required": true,
-  "secret": true,
-  "hint": "从浏览器复制完整 Cookie",
-  "help": "失效后重新粘贴即可",
-  "default": "",
-  "options": ["1080P", "720P"],
-  "refreshSeconds": 86400
-}
-```
-
-| 字段 | 说明 |
-| --- | --- |
-| `key` | 合法标识符，表达式中通过 `cfg.key` 访问 |
-| `type` | `text` / `password` / `number` / `boolean` / `select` |
-| `required` | 添加站点时强制填写 |
-| `secret` | 列表打码展示；仍存于本机存储 |
-| `options` | `select` 必填 |
-| `refreshSeconds` | 提示建议的刷新周期 |
-
-## 4. vars：运行时变量
-
-```json
-"vars": {
-  "sign":  { "expr": "md5(cfg.cookie + cfg.signKey + today())", "ttl": 7200 },
-  "token": { "expr": "at(http.post('/auth', { body: { key: cfg.apiKey } }), 'data.token')", "ttl": 1800 }
-}
-```
-
-- `expr` 在首次被引用时求值，结果按 `ttl` 缓存（秒；0 表示不缓存）。
-- 表达式中可用 `http.get(path, { query, headers })` 与 `http.post(path, { body })`。
-- 返回 JSON 时自动解码；否则返回字符串。
-- 变量之间可以互相引用（按声明顺序）。
-
-## 5. endpoints
-
-```json
-"search": {
-  "request": {
-    "method": "GET",
-    "path": "/search/{{keyword}}/page/{{page}}",
-    "headers": { "Referer": "{{base}}/" },
-    "query": { "t": "{{category}}" },
-    "body": null,
-    "timeoutMs": 15000
+```js
+var plugin = {
+  id: 'demo.mysite',        // 唯一标识，定下来就别改（站点靠它绑定）
+  name: '演示站点',
+  version: '1.0.0',
+  author: '你',             // 可选
+  description: '一句话说明', // 可选
+  base: 'https://example.com',
+  headers: {                // 可选：所有请求默认带上的头
+    'Referer': 'https://example.com/',
+    'User-Agent': '...'
   },
-  "parse": { "format": "html", "root": ".result", "fields": { "...": "..." } },
-  "filters": [
-    { "key": "area", "label": "地区", "values": ["全部", "内地", "日韩"] }
+  config: [ /* 见第 6 节 */ ]
+};
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `id` | 建议 | 小写字母/数字/`.`/`_`/`-`；不写会按名字生成 |
+| `name` | 是 | 插件列表里显示的名字 |
+| `version` | 建议 | 语义化版本 |
+| `base` | 否 | 站点默认地址；站点配置里填了 `baseUrl` 就以站点为准 |
+| `headers` | 否 | 公共请求头，脚本里发请求时自动合并 |
+| `config` | 否 | 站点级配置项，会渲染成「添加站点」的表单 |
+| `notes` | 否 | 详情页展示的备注 |
+
+### 2.2 端点函数
+
+函数名就是端点名，写了哪个就支持哪个：
+
+| 函数 | 何时调用 | 必须返回 |
+| --- | --- | --- |
+| `home(p)` | 首页 / 站点首页 | 列表 |
+| `category(p)` | 分类页（不写则退回 `home`） | 列表 |
+| `search(p)` | 搜索（`p.keyword`） | 列表 |
+| `detail(p)` | 点开某个条目（`p.id`） | 详情 |
+| `play(p)` | 点某一集（`p.id` 是剧集地址） | 播放 |
+
+不写 `search` 的插件会被全站聚合搜索跳过；不写 `detail` 就没有详情页。
+
+辅助函数随便定义，不会被当成端点：
+
+```js
+function pick(it) { return { id: String(it.id), title: it.name }; }
+function home(p) { return { list: fetchList(p).map(pick) }; }
+```
+
+### 2.3 参数 `p`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `p.base` | string | 站点地址（站点填的 `baseUrl`，没填用 `plugin.base`） |
+| `p.cfg` | object | 站点配置值，键就是 `config` 里声明的 `key` |
+| `p.page` | number | 页码，从 1 开始 |
+| `p.keyword` | string | 搜索词（仅 `search`） |
+| `p.category` | string | 分类 id（仅 `category`） |
+| `p.filters` | object | 筛选条件（仅 `category`） |
+| `p.id` | string | 详情 id / 剧集地址 |
+| `p.site` | object | `{ id, name }` |
+| `p.now` | number | 本次执行的毫秒时间戳（重放期间保持不变） |
+
+---
+
+## 3. 发请求
+
+**脚本是同步求值的**：`pq.http.get()` 直接返回字符串，不用 `await`，不用回调。
+宿主在背后把异步网络接到同步脚本上（见第 9 节）。
+
+```js
+// 最常用
+var html = pq.http.get(url);
+var json = pq.http.json(url);
+var text = pq.http.post(url, { user: 'a', pass: 'b' });   // 对象自动 JSON 序列化
+
+// 带请求头
+var html = pq.http.get(url, { headers: { 'Referer': p.base } });
+
+// 需要看状态码 / 容错
+var r = pq.http.request({ url: url, method: 'GET', timeout: 20000 });
+if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.error);
+var body = r.body;
+```
+
+`pq.http` 全部方法：
+
+| 方法 | 返回 |
+| --- | --- |
+| `get(url, opts)` | 响应文本 |
+| `json(url, opts)` | `JSON.parse` 后的对象，失败返回 `null` |
+| `post(url, body, opts)` | 响应文本 |
+| `put(url, body, opts)` | 响应文本 |
+| `del(url, opts)` | 响应文本 |
+| `postJson(url, obj, opts)` | 解析后的对象（自动带 `Content-Type`） |
+| `request({url, method, headers, body, timeout})` | `{ ok, status, headers, body, url, error }` |
+
+* 相对地址会按 `p.base` 补全。
+* 失败（DNS / 超时 / 5xx）不会抛异常，`ok=false`、`error` 里是原因，脚本自己决定怎么办。
+* 同一个 URL 在一次调用里只请求一次（含跨函数复用，缓存 90 秒）。
+
+`opts` 支持 `headers`、`timeout`（毫秒）。
+
+---
+
+## 4. 解析 HTML
+
+内置一个够用的 CSS 选择器引擎 + 文本工具，不需要 DOM：
+
+```js
+var nodes = pq.selectAll(html, '.module-item');   // 节点数组
+var first = pq.select(html, 'h1');                // 第一个节点或 null
+pq.text(node);            // 全部文本（含子节点，已去标签、解实体）
+pq.ownText(node);         // 只取直接文本
+pq.attr(node, 'href');    // 属性，取不到返回 ''
+pq.html(node);            // innerHTML
+pq.abs(p.base, href);     // 补全相对地址
+```
+
+选择器直接对字符串生效的快捷方法：
+
+```js
+pq.css(html, 'h1')                    // → ['长夜将尽']
+pq.cssAttr(html, 'a', 'href')         // → ['/p/1', '/p/2']
+pq.css(html, 'ul li a')               // 后代
+pq.css(html, 'div > ul')              // 子代
+pq.css(html, 'a[href^="/p/"]')        // 属性前缀
+pq.css(html, '.a, .b')                // 分组
+```
+
+支持的语法：`tag` `.class` `#id` `*` `[attr]` `[attr=v]` `[attr*=v]` `[attr^=v]` `[attr$=v]`、
+后代（空格）、子代（`>`）、逗号分组。
+
+其它工具：
+
+| 工具 | 说明 |
+| --- | --- |
+| `pq.clean(s)` | 去标签 + 解实体 + 压空白 |
+| `pq.num('8.9分')` | → `8.9` |
+| `pq.first(s, /re(.*?)/)` | 第一个匹配的分组 |
+| `pq.matchAll(s, /re/g)` | 全部分组 |
+| `pq.trim` / `pq.uniq` / `pq.map` / `pq.pad` | 常用小工具 |
+| `pq.query({a:1,b:''})` | → `a=1`（自动跳过空值并编码） |
+| `pq.json(s)` | 安全 `JSON.parse` |
+| `pq.get(obj, 'a.b.0.c', def)` | 安全取值 |
+| `pq.log(...)` | 写到调试面板 |
+
+---
+
+## 5. 输出结构
+
+只要求结构，字段名大小写/下划线不敏感（`vod_name` / `vodName` 都认）。
+
+### 列表
+
+```js
+{
+  list: [
+    {
+      id: '42',              // 必填，后续 detail 会原样拿到
+      title: '长夜将尽',      // 必填，空的条目会被丢弃
+      poster: 'https://.../42.jpg',
+      remarks: '更新至 3 集',
+      year: '2026',
+      area: '内地',
+      score: '8.9',
+      kind: '剧集',
+      intro: '一句话简介'
+    }
   ],
-  "pageStart": 1,
-  "pageSize": 24
+  hasMore: true              // 可选，不写就按「满 12 条」判断
 }
 ```
 
-模板变量：`cfg` `vars` `page` `keyword` `category` `filters` `id` `base` `site`。
+也可以直接返回数组：`return [ {...}, {...} ]`。
 
-`play` 端点的 `{{id}}` 是剧集地址；会额外带 `?url=<剧集地址>` 查询参数。
+### 详情
 
-若剧集地址本身就是最终播放地址（苹果CMS 等），把 `play.request.path` 留空即可：
-引擎不会发起请求，只对 `parse.fields` 求值。推荐写法 `"fields": { "url": "{{id}}" }`。
+```js
+{
+  id: '42',
+  title: '长夜将尽',
+  poster: 'https://.../42.jpg',
+  intro: '完整简介',
+  director: '陈叙',
+  actors: ['林恒', '周宛'],
+  lines: [
+    {
+      name: '量子',
+      episodes: [
+        { name: '第01集', url: 'https://.../1.m3u8' }
+      ]
+    }
+  ]
+}
+```
 
-## 6. JS 引擎（engine: js）
+`lines` 不写也可以用扁平 `episodes: [{ name, url, line }]`，宿主会按 `line` 分组。
 
-声明式规则擅长结构规整的接口；一旦站点把数据揉成复合字符串、要在多个字段间
-做条件判断、或者需要先清洗 HTML 再取字段，JSON 规则就会变得别扭。
-这时把 `engine` 换成 `js`，用脚本做「响应 → 标准结构」的映射。
+### 播放
 
-### 6.1 结构
+```js
+{ url: 'https://.../1.m3u8', headers: { 'Referer': '...' } }
+```
+
+返回字符串 URL 也可以；返回 `null` 表示"直接用传进来的剧集地址"。
+
+---
+
+## 6. 配置项 `config`
+
+声明出来的字段会变成「添加站点」时的表单，一个插件挂多个站点就靠它。
+
+```js
+var plugin = {
+  // ...
+  config: [
+    {
+      key: 'api',                  // p.cfg.api
+      label: '接口地址',
+      type: 'text',                // text | password | number | boolean | select
+      required: true,
+      hint: 'https://example.com/api.php/provide/vod/',
+      help: '填完整的 provide/vod 接口地址',
+      default: ''
+    },
+    {
+      key: 'cookie',
+      label: 'Cookie',
+      type: 'password',
+      secret: true                 // 列表里打码
+    },
+    {
+      key: 'quality',
+      label: '清晰度',
+      type: 'select',
+      options: ['1080', '720']
+    }
+  ]
+};
+```
+
+`required: true` 的项没填时，站点会标记为「未配置」，不会发请求。
+
+可选的 `refreshSeconds` 用于"定时换 token"的场景（`vars` 里声明 `ttl` 时生效）。
+
+---
+
+## 7. 完整示例
+
+### 7.1 HTML 站点
+
+```js
+var plugin = {
+  id: 'demo.html',
+  name: '演示影视',
+  version: '1.0.0',
+  base: 'https://example.com',
+  config: [{ key: 'cookie', label: 'Cookie', type: 'password' }]
+};
+
+function home(p) {
+  return parseList(p, p.base + '/index.php/vod/show/id/1/page/' + p.page + '.html');
+}
+
+function category(p) {
+  return parseList(p, p.base + '/vod/type/id/' + p.category + '/page/' + p.page + '.html');
+}
+
+function search(p) {
+  return parseList(p, p.base + '/vod/search/wd/' + encodeURIComponent(p.keyword) + '.html');
+}
+
+function parseList(p, url) {
+  var html = pq.http.get(url, { headers: { 'Cookie': pq.trim(p.cfg.cookie || '') } });
+  var nodes = pq.selectAll(html, '.module-item');
+  var out = [];
+  for (var i = 0; i < nodes.length; i++) {
+    var n = nodes[i];
+    var a = pq.select(n, 'a');
+    var href = pq.attr(a, 'href');
+    if (!href) continue;
+    var img = pq.select(n, 'img');
+    out.push({
+      id: pq.abs(p.base, href),
+      title: pq.text(pq.select(n, '.title')) || pq.attr(a, 'title'),
+      poster: pq.abs(p.base, pq.attr(img, 'data-src') || pq.attr(img, 'src')),
+      remarks: pq.text(pq.select(n, '.module-item-note'))
+    });
+  }
+  return { list: out, hasMore: out.length > 0 };
+}
+
+function detail(p) {
+  var html = pq.http.get(p.id);
+  var eps = [];
+  var links = pq.selectAll(html, '.module-play-list a');
+  for (var i = 0; i < links.length; i++) {
+    eps.push({
+      name: pq.text(links[i]) || ('第' + (i + 1) + '集'),
+      url: pq.abs(p.base, pq.attr(links[i], 'href'))
+    });
+  }
+  return {
+    id: p.id,
+    title: pq.css(html, 'h1')[0] || '',
+    intro: pq.clean(pq.css(html, '.module-info-introduction')[0] || ''),
+    lines: eps.length ? [{ name: '线路1', episodes: eps }] : []
+  };
+}
+
+function play(p) {
+  // 播放页还要再解析一次真实地址时：
+  // var html = pq.http.get(p.id);
+  // return { url: pq.first(html, /"url"\s*:\s*"([^"]+)"/) || p.id };
+  return { url: p.id };
+}
+```
+
+### 7.2 苹果CMS 接口
+
+```js
+var plugin = {
+  id: 'demo.cms',
+  name: '苹果CMS',
+  version: '1.0.0',
+  config: [{ key: 'api', label: '接口地址', required: true }]
+};
+
+function call(p, query) {
+  var url = pq.trim(p.cfg.api);
+  if (!url) throw new Error('请先填写接口地址');
+  var sep = url.indexOf('?') >= 0 ? '&' : '?';
+  var json = pq.json(pq.http.get(url + sep + pq.query(query)));
+  if (!json) throw new Error('接口没有返回 JSON');
+  return json;
+}
+
+function feed(p, query) {
+  var raw = call(p, query).list || [];
+  var out = [];
+  for (var i = 0; i < raw.length; i++) {
+    var it = raw[i];
+    out.push({
+      id: String(it.vod_id),
+      title: pq.trim(it.vod_name),
+      poster: pq.trim(it.vod_pic),
+      remarks: pq.trim(it.vod_remarks)
+    });
+  }
+  return { list: out, hasMore: out.length >= 20 };
+}
+
+function home(p) { return feed(p, { ac: 'list', pg: p.page }); }
+function category(p) { return feed(p, { ac: 'list', t: p.category, pg: p.page }); }
+function search(p) { return feed(p, { ac: 'detail', wd: p.keyword, pg: p.page }); }
+```
+
+剧集串（`vod_play_url`）的拆法见内置「苹果CMS v10」插件源码，直接复制改就行。
+
+---
+
+## 8. 调试
+
+* 插件详情 →「试跑」：选端点、填参数，看请求轨迹和解析结果。
+* 编辑器下方是校验结果：缺函数、配置项重复、脚本语法问题都会列出来。
+* `pq.log(...)` 的输出会出现在「试跑」面板里。
+* MCP 连上后可以直接让 AI 试跑、改脚本、看错误。
+
+---
+
+## 9. 同步脚本是怎么跑网络的
+
+QuickJS 是同步求值的，网络是异步的。宿主用「重放」把两者接起来：
+
+1. 脚本执行，`pq.http.get(url)` 发现缓存里没有 → 记录请求并抛出中断信号；
+2. 宿主真正发请求，把响应写进缓存；
+3. 宿主把脚本**从头再跑一遍**，这次命中缓存，返回值就是真的了；
+4. 重复直到没有新请求（最多 16 轮）。
+
+所以：
+
+* ✅ 脚本里写同步代码，`var html = pq.http.get(url);` 就是能用。
+* ❌ 不要写 `await` / `Promise` / `setTimeout`。
+* ❌ 不要用 `try/catch` 包住 `pq.http` 调用 —— 中断信号被吞掉后宿主拿不到请求。宿主有兜底（会检测未完成的请求并重跑），但白跑一轮。
+* ✅ 请求按顺序发生（第二个请求可以依赖第一个的结果）。
+* ✅ 同一 URL 只请求一次，列表 → 详情之间也复用（90 秒）。
+
+---
+
+## 10. 兼容：JSON 清单（旧格式）
+
+v1 的声明式格式仍然能被读取和执行（`engine: http` + `endpoints[].parse`），
+用于早期创建的插件。新建插件不再提供这个入口。
+
+如果你有一个旧插件想迁到脚本：复制它的 `config`，把 `endpoints` 里的请求和选择器
+翻译成 `home` / `search` / `detail` / `play` 四个函数即可，见第 7 节。
+
+<details>
+<summary>旧格式参考（点击展开）</summary>
 
 ```json
 {
   "spec": 1,
-  "id": "poqi.cms.v10",
-  "name": "苹果CMS v10",
-  "version": "2.0.0",
-  "engine": "js",
+  "id": "demo.json",
+  "name": "声明式插件",
+  "version": "1.0.0",
+  "engine": "http",
   "baseUrl": "https://example.com",
-  "script": "function home(ctx) { ... }",
+  "config": [{ "key": "api", "label": "接口地址", "required": true }],
   "endpoints": {
     "home": {
-      "request": { "path": "/api.php/provide/vod/", "query": { "ac": "list", "pg": "{{page}}" } },
-      "js": "home"
-    },
-    "detail": {
-      "request": { "path": "/api.php/provide/vod/", "query": { "ac": "detail", "ids": "{{id}}" } },
-      "js": "detail"
-    },
-    "play": { "request": { "path": "" }, "js": "play" }
-  }
-}
-```
-
-- `script` 是完整脚本，含所有端点函数。
-- 端点的 `js` 是函数名，省略时按端点名推断（`home` 端点调 `home()`）。
-- `request` 的写法与声明式完全一致：模板变量、headers、query、body 都照旧。
-  **请求由 Dart 发起**，脚本只处理拿到的响应。
-- `engine: js` 时不需要 `parse`。
-
-### 6.2 上下文（ctx）
-
-| 字段 | 说明 |
-| --- | --- |
-| `ctx.body` | 响应原文（字符串） |
-| `ctx.json` | 响应若是 JSON，这里是解析后的对象；否则为 `null` |
-| `ctx.url` | 最终请求地址（跟随重定向后） |
-| `ctx.status` | HTTP 状态码 |
-| `ctx.headers` | 响应头 |
-| `ctx.base` | 站点的 baseUrl |
-| `ctx.page` | 页码 |
-| `ctx.keyword` | 搜索词（search 端点） |
-| `ctx.category` | 分类（category 端点） |
-| `ctx.filters` | 筛选参数对象 |
-| `ctx.id` | 详情 / 播放端点传入的 id（播放时就是剧集地址） |
-| `ctx.cfg` | 该站点填写的配置项 |
-| `ctx.vars` | 已解析的运行时变量 |
-| `ctx.site` | `{ id, name }` |
-
-### 6.3 返回值
-
-**列表端点**（`home` / `category` / `search`）返回数组：
-
-```js
-[{ id, title, poster, year, area, remarks, score, kind, intro, tags }]
-```
-
-**详情端点** 返回对象，在上面的字段基础上加：
-
-```js
-{
-  id, title, poster, year, area, remarks, score, kind, intro,
-  director, actors: ['…'],
-  lines: [{ name, episodes: [{ name, url }] }]
-}
-```
-
-也可以返回扁平的 `episodes: [{ name, url, line }]`，引擎会按 `line` 自动分组。
-
-**播放端点** 返回 `{ url }` 或一个字符串；返回空则由引擎回落到传入的剧集地址。
-
-字段名大小写与下划线都不敏感（`vod_name` 与 `vodName` 等价），数字/布尔会自动转字符串。
-`poster` 支持相对路径，引擎会用 `ctx.base` 补全。缺 `title` 的条目会被丢弃。
-
-### 6.4 内置工具 pq
-
-```js
-pq.get(obj, 'data.list', [])   // 安全取深层字段
-pq.select(html, 'css')         // 第一个匹配节点
-pq.selectAll(html, 'css')      // 全部匹配
-pq.css(html, 'css')            // 匹配到的文本数组
-pq.cssAttr(html, 'css', 'href')
-pq.text(node) / pq.ownText(node) / pq.attr(node, 'href')
-pq.html(node) / pq.outer(node)
-pq.abs('https://a.com', '/p/1.jpg')
-pq.clean('<b>x</b>&nbsp;y')    // 去标签 + 解实体 → 'x y'
-pq.matchAll(str, /(\d+)/g, 1)  // 全局正则，取第 1 组
-pq.first(str, /id=(\d+)/)      // 首个匹配
-pq.num('8.9 分')               // → 8.9
-pq.trim / pq.uniq / pq.map / pq.pad
-```
-
-CSS 选择器支持：`tag`、`.class`、`#id`、`*`、`[attr]`、`[attr=v]`、`[attr*=v]`、
-`[attr^=v]`、`[attr$=v]`，组合器支持后代（空格）与子代（`>`），逗号分组。
-不支持伪类与 `+` / `~` 相邻选择器——够用，且实现只有几百行，行为可预期。
-
-### 6.5 示例：多线路剧集
-
-苹果CMS 的 `vod_play_url` 是 `线路$$$线路`、`集#集`、`集名$地址` 三层嵌套的字符串，
-用脚本表达比声明式清晰得多：
-
-```js
-function cmsLines(fromRaw, urlRaw, base) {
-  var lines = [];
-  var names = String(fromRaw || '').split('$$$');
-  var groups = String(urlRaw || '').split('$$$');
-  for (var g = 0; g < groups.length; g++) {
-    var parts = groups[g].split('#');
-    var eps = [];
-    for (var i = 0; i < parts.length; i++) {
-      var seg = parts[i];
-      if (!seg) continue;
-      var cut = seg.indexOf('$');
-      var name = cut < 0 ? '' : seg.slice(0, cut);
-      var url = cut < 0 ? seg : seg.slice(cut + 1);
-      if (!url) continue;
-      eps.push({ name: name || ('第' + (i + 1) + '集'), url: pq.abs(base, url) });
+      "request": { "path": "{{cfg.api}}", "query": { "ac": "list", "pg": "{{page}}" } },
+      "parse": {
+        "format": "json",
+        "root": "list",
+        "fields": { "id": "item.vod_id", "title": "item.vod_name" }
+      }
     }
-    if (eps.length) lines.push({ name: names[g] || ('线路' + (g + 1)), episodes: eps });
-  }
-  return lines;
-}
-```
-
-### 6.6 限制（有意为之）
-
-- **脚本不能自己发请求**。需要多步请求的场景（先取 token 再查列表）请用 `vars`：
-  每个变量是一次独立请求，表达式或脚本负责提取，结果会带进 `ctx.vars`。
-  这样做的原因是同步 HTTP 会卡死 UI，异步回调又会让插件行为不可预测。
-- **同步执行**。单次脚本求值应控制在几十毫秒内；不要在脚本里写大循环处理整站数据。
-- **没有 `require` / 网络 / 文件系统**。ES5 + JSON + 正则 + 内置 `pq`，仅此而已。
-- 脚本报错会带函数名返回给「试跑端点」，据此定位即可。
-
-### 6.7 调试
-
-插件编辑器右上角的终端图标打开脚本编辑器；保存后用「试跑端点」选择 `home` / `category` /
-`search` / `detail` / `play`，填入关键词或 id，直接看解析出的条目数与首条标题。
-脚本改动不需要重新打包。
-
-## 7. parse
-
-### JSON
-
-```json
-{
-  "format": "json",
-  "root": "data.list",
-  "fields": {
-    "id": "item.vod_id",
-    "title": "item.vod_name",
-    "poster": "item.vod_pic",
-    "score": "item.vod_score"
   }
 }
 ```
 
-`root` 支持 `a.b[0].c`；为空表示根节点。字段值会作为 `item` 注入表达式。
+`parse.format` 支持 `json`（路径表达式）、`html`（CSS 选择器）、`regex`、`split`（剧集串）。
+`request.path` / `query` / `headers` 支持 `{{ }}` 模板，可用 `cfg` / `vars` / `page` / `keyword` / `category` / `id`。
 
-### HTML
+</details>
 
-```json
-{
-  "format": "html",
-  "root": ".module-item",
-  "fields": {
-    "id": "attr(sel(item, 'a'), 'href')",
-    "title": "text(sel(item, '.title'))",
-    "poster": "attr(sel(item, 'img'), 'data-src')"
-  },
-  "episodes": {
-    "format": "html",
-    "root": ".play-list a",
-    "fields": { "name": "text(item)", "url": "attr(item, 'href')" }
-  }
-}
-```
+---
 
-`root` 额外支持 `selector >> first` / `selector >> last` 管道。
+## 11. 差量修改（补丁）
 
-### regex
+* 每次保存在本地留一条版本记录（最近 40 条），首版是全量快照，之后是 unified diff。
+* 脚本插件的补丁**直接打在脚本源码上**，不是打在 JSON 上。
+* MCP 的 `poqi_apply_patch` 接受 `@@` 开头的 unified diff；冲突会返回行号，不会改坏文件。
 
-```json
-{ "format": "regex", "pattern": "\"url\":\"(.*?)\"", "group": 1 }
-```
-
-### split（剧集串）
-
-苹果CMS 的 `vod_play_url` 把线路、剧集、集名/地址压在一个字符串里：
-
-```
-第01集$https://x/1.m3u8#第02集$https://x/2.m3u8$$$第01集$https://y/1.m3u8
-```
-
-用 `split` 格式声明，`from` / `lineNames` 针对**详情记录**求值：
-
-```json
-"episodes": {
-  "format": "split",
-  "from": "item.vod_play_url",
-  "lineNames": "item.vod_play_from",
-  "lineSep": "$$$",
-  "itemSep": "#",
-  "pairSep": "$"
-}
-```
-
-| 字段 | 缺省 | 说明 |
-| --- | --- | --- |
-| `from` | 必填 | 剧集串表达式 |
-| `lineNames` | 可省略 | 线路名串；省略或数量不足时用「线路1/线路2…」 |
-| `lineSep` | `$$$` | 线路分隔符 |
-| `itemSep` | `#` | 剧集分隔符 |
-| `pairSep` | `$` | 集名与地址的分隔符 |
-
-拆分规则：空线路、空片段、空地址会被跳过；片段中没有 `pairSep` 时整段当地址，
-集名按「第 N 集」自动编号；线路数与线路名数量不一致时按索引尽量匹配，不会报错。
-拆分结果会转成 `{name, url, line}` 记录，交给标准的剧集分组逻辑。
-
-## 8. 标准字段
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `id` | 是 | 站内唯一，常取详情页路径 |
-| `title` | 是 | 片名 |
-| `poster` | 否 | 海报；相对地址自动补全 |
-| `year` `score` `remarks` `area` `kind` | 否 | 元信息 |
-| `tags` | 否 | 数组，或用 `,`/`|` 分隔的字符串 |
-| `intro` `director` `actors` | 详情页 | 简介/导演/演员（演员用 `,` 分隔） |
-| `name` `url` `line` | 剧集 | 集名、播放页地址、线路名（缺省为"默认线路"） |
-
-## 9. 表达式函数
-
-| 分组 | 函数 |
-| --- | --- |
-| 字符串 | `text` `html` `trim` `lower` `upper` `replace` `split` `join` `substr(s,start,len)` `startsWith` `contains` `regex(s,p,g)` |
-| 数字 | `int` `number` `abs` `min` `max` `round` |
-| 集合 | `len` `first` `last` `nth` `slice` `reverse` `uniq` `keys` `values` |
-| 筛选 | `where(list,key,value)` `find(list,key,value)`；`key` 为 Map 字段名，值按宽松相等比较（`1` 与 `"1"` 相同），入参非法时返回空数组 / `null` |
-| JSON | `json` `at(v,'a.b[0]')` `path` `encode` |
-| HTML | `sel(node,css)` `selAll(node,css)` `attr(node,key)` |
-| 编码 | `md5` `sha1` `b64` `b64d` `urlencode` |
-| 时间 | `now()` `ts()` `today()` |
-| 随机 | `rand(n)` `uuid()` |
-| URL | `resolve(v)` `domain(v)` |
-| 逻辑 | `coalesce` `default` `if(cond,a,b)` `not` |
-
-运算符：`+ - * / %`、`== != < <= > >=`、`&& || !`、三元 `? :`、成员 `.`、下标 `[]`。
-
-## 10. 差量修改（补丁）
-
-编辑器每次保存都会生成一条版本记录，包含相对于上一版的 unified diff：
-
-```
---- a/plugin.json
-+++ b/plugin.json
-@@ -7,7 +8,8 @@
- {
--  "name": "棱镜",
-+  "name": "棱镜 · 演示源",
-   "endpoints": {
-```
-
-应用方式：
-
-1. 应用内「插件编辑器 → 应用补丁」，粘贴后即时校验并应用。
-2. MCP 工具 `poqi_apply_patch`，参数 `{ id, patch, message }`。
-3. 冲突时返回补丁中的具体行号，原文本不会被改动。
-4. 需要回滚时，在「版本」面板选择任意版本载入，或 `poqi_list_revisions` 取历史快照。
-
-## 11. 调试节奏
-
-1. 先跑 `home`：确认列表 selector 与必填字段。
-2. 再跑 `detail`：确认 `episodes` 能拆出线路与集数。
-3. 最后跑 `play`：确认直链可解析；HLS/MP4 会交给播放器。
-4. 常见问题：`root` 未命中（页面结构变了）、403（Cookie/Referer 缺失）、
-   表达式语法错误（编辑器会直接标红）、相对地址未补全（用 `resolve()`）。
+---
 
 ## 12. 局域网 MCP
 
-```bash
-curl -X POST http://192.168.1.8:8765/mcp \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
-        "name":"poqi_search","arguments":{"keyword":"长夜"}}}'
-```
+App 里打开「连接」页 → 启动 MCP 服务，同一局域网内的 AI 客户端用
+`http://<手机IP>:<端口>/mcp` 接入（JSON-RPC 2.0，无鉴权，仅限内网）。
 
-MCP 端点不校验配对码：只要设备在同一个局域网内、能在「连接」页看到端口，
-就能直接读写。真正的边界是"同一个 Wi-Fi"，而不是一个所有人都懒得填的 4 位数字。
+可用工具：
 
-工具清单见 README。所有工具返回 MCP `content[0].text`，内容为 JSON 字符串。
+| 工具 | 用途 |
+| --- | --- |
+| `poqi_list_plugins` / `poqi_get_plugin` | 读插件（含脚本源码） |
+| `poqi_save_plugin` | **传 `script` 直接写入一个插件** |
+| `poqi_apply_patch` | 对脚本做差量修改 |
+| `poqi_test_endpoint` | 试跑端点，返回真实响应与解析结果 |
+| `poqi_list_sites` / `poqi_save_site` | 站点管理 |
+| `poqi_search` / `poqi_get_detail` | 跨站点搜索与详情 |
+
+接上后 `initialize` 的 `instructions` 里带着一份精简规范，AI 不需要额外提示就知道怎么写。

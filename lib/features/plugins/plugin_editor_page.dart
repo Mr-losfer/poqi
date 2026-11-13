@@ -12,6 +12,7 @@ import '../../core/ui/primitives.dart';
 import '../../data/repositories.dart';
 import '../../domain/models/media.dart';
 import '../../domain/models/plugin.dart';
+import '../../domain/plugin/js/plugin_script.dart';
 import '../../domain/models/site.dart';
 import '../../domain/plugin/diff.dart';
 import '../../domain/plugin/runner.dart';
@@ -40,6 +41,10 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
   List<PluginIssue> _issues = const [];
   String? _parseError;
 
+  /// 单文件脚本插件：编辑器里显示的、保存的就是脚本本身，不再是 JSON 清单。
+  late final bool _scriptMode;
+  PluginManifest? _compiled;
+
   // 测试台状态
   String? _testEndpoint;
   final _testInput = TextEditingController();
@@ -55,7 +60,8 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
   void initState() {
     super.initState();
     final plugin = ref.read(pluginsProvider).where((p) => p.id == widget.pluginId).firstOrNull;
-    _savedText = plugin?.toJsonString() ?? '{}';
+    _scriptMode = plugin?.source == PluginSource.script;
+    _savedText = _scriptMode ? (plugin?.script ?? '') : (plugin?.toJsonString() ?? '{}');
     _code = TextEditingController(text: _savedText);
     _code.addListener(_onChanged);
     _validate();
@@ -74,6 +80,23 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
   }
 
   void _validate() {
+    if (_scriptMode) {
+      try {
+        final manifest = PluginScript.compile(_code.text, fallbackId: widget.pluginId);
+        setState(() {
+          _compiled = manifest;
+          _parseError = null;
+          _issues = const PluginValidator().validate(manifest);
+        });
+      } catch (e) {
+        setState(() {
+          _compiled = null;
+          _parseError = '$e';
+          _issues = const [];
+        });
+      }
+      return;
+    }
     try {
       final decoded = jsonDecode(_code.text);
       if (decoded is! Map) {
@@ -105,6 +128,7 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
   }
 
   PluginManifest? _manifest() {
+    if (_scriptMode) return _compiled;
     try {
       final decoded = jsonDecode(_code.text);
       if (decoded is! Map) return null;
@@ -137,7 +161,8 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
   }
 
   Future<void> _save() async {
-    final manifest = _manifest();
+    if (_scriptMode) _validate();
+    var manifest = _manifest();
     if (manifest == null) {
       showPqToast(context, _parseError ?? 'JSON 无法解析', kind: PqToastKind.error);
       return;
@@ -152,16 +177,22 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
       );
       return;
     }
+    var target = manifest;
+    if (_scriptMode && target.id != widget.pluginId) {
+      // 站点是按插件 id 绑定的，脚本里改 id 会让已有站点失联。
+      // 这里以「打开编辑器时的 id」为准，避免一次改名把站点全部弄丢。
+      target = target.copyWith(id: widget.pluginId);
+    }
     final duplicate = ref
         .read(pluginsProvider)
-        .where((p) => p.id == manifest.id && p.id != widget.pluginId)
+        .where((p) => p.id == target.id && p.id != widget.pluginId)
         .toList();
     if (duplicate.isNotEmpty) {
       showPqToast(context, '插件 id 已被占用', kind: PqToastKind.error);
       return;
     }
 
-    await ref.read(pluginsProvider.notifier).save(manifest, message: '编辑器保存');
+    await ref.read(pluginsProvider.notifier).save(target, message: '编辑器保存');
     if (!mounted) return;
     setState(() => _savedText = _code.text);
     _onChanged();
@@ -169,6 +200,10 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
   }
 
   void _format() {
+    if (_scriptMode) {
+      showPqToast(context, '脚本模式不需要 JSON 格式化', kind: PqToastKind.info);
+      return;
+    }
     try {
       final decoded = jsonDecode(_code.text);
       final pretty = const JsonEncoder.withIndent('  ').convert(decoded);
@@ -404,7 +439,7 @@ class _PluginEditorPageState extends ConsumerState<PluginEditorPage> {
               onPatch: _applyPatchDialog,
               onCopyPatch: _copyPatch,
               onValidate: _validate,
-              onEditScript: _manifest()?.engine == PluginEngine.js ? _editScript : null,
+              onEditScript: (!_scriptMode && _manifest()?.engine == PluginEngine.js) ? _editScript : null,
               onDelete: () => _delete(plugin),
             ),
             Divider(height: 1, color: p.lineSoft),

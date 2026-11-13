@@ -8,6 +8,7 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
 import '../../domain/models/plugin.dart';
+import '../../domain/plugin/js/plugin_script.dart';
 import '../../domain/models/site.dart';
 import '../../domain/plugin/validator.dart';
 import '../backend.dart';
@@ -28,6 +29,54 @@ Response _json(Object? data, {int status = 200}) => Response(
 ///
 /// 让任意 MCP 客户端（Claude Desktop / IDE / 自研 Agent）直接读写 Poqi 的
 /// 插件、站点与媒体库，实现"用自然语言写插件、跑搜索、改代码"。
+/// 接上来的 AI 第一时间要知道的事：插件长什么样、怎么发请求、返回什么结构。
+const String _instructions = r"""
+Poqi 是可编程的影视聚合器。一个 .js 文件就是一个插件，用 poqi_save_plugin 的 script 参数写入。
+
+【插件结构】
+var plugin = {
+  id: 'demo.site',            // 唯一标识，定下来别改
+  name: '站点名',
+  version: '1.0.0',
+  base: 'https://example.com',
+  headers: { 'User-Agent': '...' },   // 可选，所有请求默认带上
+  config: [                    // 会变成「添加站点」时填的表单
+    { key: 'api', label: '接口地址', required: true },
+    { key: 'cookie', label: 'Cookie', type: 'password' }
+  ]
+};
+
+function home(p) {}      // 首页列表
+function category(p) {}  // 分类列表（可选，缺省退回 home）
+function search(p) {}    // 搜索
+function detail(p) {}    // 详情
+function play(p) {}      // 播放地址
+
+【参数 p】
+p.base  p.cfg  p.page  p.keyword  p.category  p.filters  p.id  p.site
+
+【发请求（同步写法）】
+var html = pq.http.get(url, { headers: { 'Referer': p.base } });
+var json = pq.http.json(url);
+var text = pq.http.post(url, body);
+var r    = pq.http.request({ url: url, method: 'GET' });  // {ok,status,headers,body,url,error}
+
+【解析】
+pq.selectAll(html, '.item')   pq.select(node, 'a')   pq.text(node)   pq.attr(node, 'href')
+pq.css(html, '.title')        pq.cssAttr(html, 'a', 'href')          pq.abs(p.base, href)
+pq.clean(html)  pq.num(s)  pq.first(s, /re(.*?)/)  pq.matchAll(s, /re/g)  pq.trim  pq.json  pq.query
+
+【返回结构】
+列表：{ list: [{ id, title, poster, remarks, year, area, score, kind, intro }], hasMore: true }
+详情：{ id, title, poster, intro, director, actors: [], lines: [{ name, episodes: [{ name, url }] }] }
+播放：{ url, headers? }
+
+【注意】
+* 脚本是同步求值的：pq.http.get 直接返回字符串，不要写 await / Promise / 回调。
+* 不要在 pq.http 调用外面包 try/catch —— 宿主靠中断信号补数据，吞掉会让结果为空。
+* 改已有插件优先用 poqi_apply_patch 传 unified diff，补丁直接打在脚本源码上。
+""";
+
 class McpServer {
   McpServer({required this.backend, required this.deviceName, this.onMutated});
 
@@ -174,9 +223,7 @@ class McpServer {
               'version': '1.0.0',
               'title': 'Poqi 影视聚合与插件平台',
             },
-            'instructions':
-                'Poqi 是一个可编程的影视聚合器。可以用 poqi_search 跨站点搜索，'
-                    'poqi_get_detail 读取剧集，poqi_save_plugin / poqi_apply_patch 编写与修改插件规则。',
+            'instructions': _instructions,
           });
         case 'ping':
           return _result(id, {});
@@ -309,20 +356,43 @@ class McpServer {
         ),
         _Tool(
           name: 'poqi_save_plugin',
-          description: '创建或覆盖插件（全量写入）。会生成一条版本记录，可用于回滚。',
+          description: '创建或覆盖插件。推荐直接传 script：一个 .js 文件就是一个插件，'
+              '元信息写在 var plugin = {...} 里，逻辑全在脚本函数里。',
           schema: {
             'type': 'object',
             'properties': {
-              'plugin': {'type': ['object', 'string'], 'description': '完整插件 JSON'},
+              'script': {
+                'type': 'string',
+                'description': '单文件插件源码（推荐）。元信息用 var plugin = {...} 声明',
+              },
+              'plugin': {'type': ['object', 'string'], 'description': '完整插件 JSON（老格式，兼容用）'},
               'message': {'type': 'string', 'description': '本次修改说明'},
             },
-            'required': ['plugin'],
           },
           handler: (args) async {
-            final raw = args['plugin'];
-            final manifest = raw is String
-                ? PluginManifest.fromJsonString(raw)
-                : PluginManifest.fromJson((raw as Map).cast<String, dynamic>());
+            final script = args['script'];
+            PluginManifest manifest;
+            if (script is String && script.trim().isNotEmpty) {
+              try {
+                manifest = PluginScript.compile(script);
+              } catch (e) {
+                return {
+                  'saved': false,
+                  'errors': ['$e'],
+                };
+              }
+            } else {
+              final raw = args['plugin'];
+              if (raw == null) {
+                return {
+                  'saved': false,
+                  'errors': ['需要 script（脚本源码）或 plugin（JSON 清单）'],
+                };
+              }
+              manifest = raw is String
+                  ? PluginManifest.fromJsonString(raw)
+                  : PluginManifest.fromJson((raw as Map).cast<String, dynamic>());
+            }
             final issues = const PluginValidator().validate(manifest);
             final errors = issues.where((e) => e.isError).toList();
             if (errors.isNotEmpty) {

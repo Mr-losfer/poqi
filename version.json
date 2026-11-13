@@ -1,16 +1,9 @@
 {
-  "version": "1.1.0",
-  "tag": "v1.1.0",
+  "version": "1.2.0",
+  "tag": "v1.2.0",
   "channel": "stable",
-  "notes": "修复新建插件与 MCP 写入静默失败；插件新增 JavaScript 引擎；首页与顶栏支持站点切换；界面改为标准 Material 3。",
-  "publishedAt": "2026-11-14T00:00:00Z",
-  "htmlUrl": "https://github.com/Mr-losfer/poqi/releases/tag/v1.1.0",
-  "assets": [
-    {
-      "name": "poqi-1.1.0.apk",
-      "url": "https://github.com/Mr-losfer/poqi/releases/download/v1.1.0/poqi-1.1.0.apk",
-      "size": 62088892,
-      "sha256": "45bce702d198896c23d53983b1596b6e411726199741f81a647335a1127917c2"
-    }
-  ]
+  "notes": "插件改成单文件脚本：一个 .js 文件就是一个插件，网络请求、HTML 解析、输出结构全在脚本里；新增 pq.http 同步请求与 16 轮重放调度；内置插件重写为完整脚本示例。",
+  "publishedAt": "2026-11-14T02:00:00Z",
+  "htmlUrl": "https://github.com/Mr-losfer/poqi/releases/tag/v1.2.0",
+  "assets": []
 }

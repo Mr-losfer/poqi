@@ -28,10 +28,12 @@ class PluginValidator {
       ));
     }
     final isJs = p.engine == PluginEngine.js;
-    if (p.engine != PluginEngine.demo && p.baseUrl.trim().isEmpty) {
+    // 单文件脚本插件自己拼 URL，baseUrl 只是「站点默认地址」，可以为空。
+    final isScript = p.source == PluginSource.script;
+    if (p.engine != PluginEngine.demo && !isScript && p.baseUrl.trim().isEmpty) {
       issues.add(const PluginIssue(
         IssueLevel.error,
-        'HTTP 插件必须声明 baseUrl',
+        '插件必须声明 baseUrl（或在脚本里写死站点地址）',
         path: 'baseUrl',
       ));
     }
