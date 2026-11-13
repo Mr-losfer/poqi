@@ -3,14 +3,15 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../core/design/pq_theme.dart';
 import '../../core/ui/adaptive.dart';
 import '../../core/ui/motion.dart';
 import '../../core/ui/poster.dart';
 import '../../core/ui/primitives.dart';
 import '../../domain/models/media.dart';
 
-/// 竖版海报卡：2:3，悬停浮起，右下角信息随宽度自适应。
+/// 竖版海报卡：Material 3 卡片 + 2:3 海报 + 两行文字。
+///
+/// 交互全部交给 [Card] / [InkWell]：水波纹、hover 状态层、焦点环都由框架提供。
 class PosterCard extends StatelessWidget {
   const PosterCard({
     super.key,
@@ -29,185 +30,101 @@ class PosterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return LayoutBuilder(
-      builder: (context, c) {
-        final w = c.maxWidth.isFinite ? c.maxWidth : 160.0;
-        final compact = w < 120;
-        return HoverZoom(
-          borderRadius: 14,
-          child: PqPressable(
-            onTap: onTap,
-            borderRadius: 14,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: onTap,
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final width = c.maxWidth.isFinite ? c.maxWidth : 160.0;
+            final posterHeight = width / aspect;
+            // 空间不足时（如工具页的紧凑缩略图）只显示海报，避免溢出。
+            final showText = !c.maxHeight.isFinite || c.maxHeight >= posterHeight + 56;
+            final meta = _metaLine();
+
+            return Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 AspectRatio(
                   aspectRatio: aspect,
                   child: Stack(
+                    fit: StackFit.expand,
                     children: [
-                      Positioned.fill(
-                        child: SmartImage(
-                          url: item.poster,
-                          title: item.title,
-                          seed: '${item.sourceId}-${item.title}',
-                          radius: 14,
-                        ),
-                      ),
-                      // 底部渐隐，压住海报上的杂色。
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(14),
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.black.withOpacity(0.05),
-                                  Colors.black.withOpacity(0.0),
-                                  Colors.black.withOpacity(0.55),
-                                ],
-                                stops: const [0, 0.55, 1],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        left: 10,
-                        right: 10,
-                        bottom: 9,
-                        child: Row(
-                          children: [
-                            if (item.score != null && item.score!.isNotEmpty)
-                              _ScorePill(score: item.score!),
-                            const Spacer(),
-                            if (item.remarks != null && item.remarks!.isNotEmpty)
-                              Flexible(
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.45),
-                                    borderRadius: BorderRadius.circular(5),
-                                    border: Border.all(
-                                      color: Colors.white.withOpacity(0.14),
-                                      width: 0.7,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    item.remarks!,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: PqType.label.copyWith(
-                                      fontSize: 9.5,
-                                      color: Colors.white.withOpacity(0.9),
-                                      letterSpacing: 0,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
+                      SmartImage(
+                        url: item.poster,
+                        title: item.title,
+                        seed: '${item.sourceId}-${item.title}',
+                        radius: 0,
                       ),
                       if (rank != null)
                         Positioned(
                           left: 8,
                           top: 8,
-                          child: Container(
-                            width: 22,
-                            height: 22,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: p.accent,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              '$rank',
-                              style: PqType.label.copyWith(
-                                fontFamily: 'Bricolage',
-                                color: p.onAccent,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ),
+                          child: PqTag('$rank'),
+                        ),
+                      if (item.score != null && item.score!.isNotEmpty)
+                        Positioned(
+                          left: 8,
+                          bottom: 8,
+                          child: PqTag(item.score!),
                         ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 9),
-                Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: PqType.title.copyWith(fontSize: compact ? 12 : 13.5, color: p.text),
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    if (item.year != null && item.year!.isNotEmpty)
-                      Text(
-                        item.year!,
-                        style: PqType.bodySmall.copyWith(fontSize: 11, color: p.textFaint),
-                      ),
-                    if (item.year != null && showSource)
-                      Text(
-                        ' · ',
-                        style: PqType.bodySmall.copyWith(fontSize: 11, color: p.textFaint),
-                      ),
-                    if (showSource)
-                      Expanded(
-                        child: Text(
-                          item.sourceName ?? '',
+                if (showText)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: PqType.bodySmall.copyWith(
-                            fontSize: 11,
-                            color: p.textFaint,
-                          ),
+                          style: theme.textTheme.titleSmall,
                         ),
-                      ),
-                  ],
-                ),
+                        if (meta.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            meta,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
               ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ScorePill extends StatelessWidget {
-  const _ScorePill({required this.score});
-
-  final String score;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-      decoration: BoxDecoration(
-        color: p.accent.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(5),
-      ),
-      child: Text(
-        score,
-        style: PqType.label.copyWith(
-          fontSize: 9.5,
-          color: p.onAccent,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0,
+            );
+          },
         ),
       ),
     );
   }
+
+  String _metaLine() {
+    final parts = <String>[
+      if (item.year != null && item.year!.isNotEmpty) item.year!,
+      if (item.remarks != null && item.remarks!.isNotEmpty) item.remarks!,
+      if (showSource && (item.sourceName ?? '').isNotEmpty) item.sourceName!,
+    ];
+    return parts.join(' · ');
+  }
 }
 
-/// 横向轨道：宽屏时给出左右翻页按钮。
+/// 横向轨道：桌面端显示左右翻页按钮，到达两端时按钮禁用。
 class MediaRail extends StatefulWidget {
   const MediaRail({
     super.key,
@@ -221,7 +138,7 @@ class MediaRail extends StatefulWidget {
   final List<MediaItem> items;
   final void Function(MediaItem item) onTap;
 
-  /// 为空时按海报比例自动计算，避免文字被裁切。
+  /// 为空时按海报比例自动计算，预留两行文字的高度。
   final double? height;
   final double itemWidth;
   final bool showSource;
@@ -272,9 +189,10 @@ class _MediaRailState extends State<MediaRail> {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
     final expanded = !PqAdaptive.isCompact(context);
-    final height = widget.height ?? widget.itemWidth * 1.5 + 56;
+    final height = widget.height ?? widget.itemWidth * 1.5 + 60;
+    const textArea = 56.0;
+
     return SizedBox(
       height: height,
       child: Stack(
@@ -282,10 +200,7 @@ class _MediaRailState extends State<MediaRail> {
           ListView.separated(
             controller: _controller,
             scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.only(
-              left: PqAdaptive.gutter(context),
-              right: PqAdaptive.gutter(context) + (expanded ? 40 : 0),
-            ),
+            padding: EdgeInsets.symmetric(horizontal: PqAdaptive.gutter(context)),
             itemCount: widget.items.length,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, i) => SizedBox(
@@ -300,83 +215,39 @@ class _MediaRailState extends State<MediaRail> {
               ),
             ),
           ),
-          if (expanded && _canBack)
+          if (expanded)
             Positioned(
-              left: 6,
+              left: 4,
               top: 0,
-              bottom: 34,
-              child: Center(child: _RailArrow(icon: Icons.chevron_left_rounded, onTap: () => _nudge(-420))),
-            ),
-          if (expanded && _canForward)
-            Positioned(
-              right: 6,
-              top: 0,
-              bottom: 34,
-              child: Center(child: _RailArrow(icon: Icons.chevron_right_rounded, onTap: () => _nudge(420))),
-            ),
-          // 底部渐隐提示还有内容
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 34,
-            width: 56,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [p.canvas.withOpacity(0), p.canvas.withOpacity(0.85)],
-                  ),
+              bottom: textArea,
+              child: Center(
+                child: IconButton.filledTonal(
+                  tooltip: '上一页',
+                  onPressed: _canBack ? () => _nudge(-420) : null,
+                  icon: const Icon(Icons.chevron_left),
                 ),
               ),
             ),
-          ),
+          if (expanded)
+            Positioned(
+              right: 4,
+              top: 0,
+              bottom: textArea,
+              child: Center(
+                child: IconButton.filledTonal(
+                  tooltip: '下一页',
+                  onPressed: _canForward ? () => _nudge(420) : null,
+                  icon: const Icon(Icons.chevron_right),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-class _RailArrow extends StatefulWidget {
-  const _RailArrow({required this.icon, required this.onTap});
-
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  State<_RailArrow> createState() => _RailArrowState();
-}
-
-class _RailArrowState extends State<_RailArrow> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: _hover ? p.surfaceHigher : p.surface.withOpacity(0.86),
-            shape: BoxShape.circle,
-            border: Border.all(color: p.line),
-          ),
-          child: Icon(widget.icon, size: 20, color: p.text),
-        ),
-      ),
-    );
-  }
-}
-
-/// 自适应宫格：列数随宽度变化。
+/// 自适应宫格：用 [GridView] + 最大列宽约束，不再手算列数。
 class MediaGrid extends StatelessWidget {
   const MediaGrid({
     super.key,
@@ -385,7 +256,7 @@ class MediaGrid extends StatelessWidget {
     this.targetWidth = 150,
     this.minColumns = 2,
     this.maxColumns = 9,
-    this.spacing = 14,
+    this.spacing = 12,
     this.padding = EdgeInsets.zero,
   });
 
@@ -399,30 +270,41 @@ class MediaGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+
     return LayoutBuilder(
       builder: (context, c) {
-        final cols = PqAdaptive.columnsFor(
-          c.maxWidth,
-          target: targetWidth,
-          min: minColumns,
-          max: maxColumns,
-        );
-        final w = (c.maxWidth - spacing * (cols - 1)) / cols;
-        return Padding(
+        final width = (c.maxWidth.isFinite ? c.maxWidth : 0) - padding.horizontal;
+        if (width <= 0) return const SizedBox.shrink();
+
+        var maxExtent = targetWidth * 1.2;
+        var columns = ((width + spacing) / (maxExtent + spacing)).ceil();
+        if (columns > maxColumns) {
+          maxExtent = width / maxColumns;
+        } else if (columns < minColumns) {
+          maxExtent = width / minColumns;
+        }
+        columns = ((width + spacing) / (maxExtent + spacing)).ceil();
+        final tileWidth = (width - spacing * (columns - 1)) / columns;
+        final tileHeight = tileWidth * 1.5 + 60;
+        final height = c.maxHeight.isFinite
+            ? math.min(tileHeight, c.maxHeight)
+            : tileHeight;
+
+        return GridView.builder(
           padding: padding,
-          child: Wrap(
-            spacing: spacing,
-            runSpacing: spacing + 22,
-            children: [
-              for (var i = 0; i < items.length; i++)
-                SizedBox(
-                  width: w,
-                  child: PqStagger(
-                    index: i,
-                    child: PosterCard(item: items[i], onTap: () => onTap(items[i])),
-                  ),
-                ),
-            ],
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: maxExtent,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: spacing,
+            mainAxisExtent: height,
+          ),
+          itemCount: items.length,
+          itemBuilder: (context, i) => PqStagger(
+            index: i,
+            child: PosterCard(item: items[i], onTap: () => onTap(items[i])),
           ),
         );
       },
@@ -430,7 +312,7 @@ class MediaGrid extends StatelessWidget {
   }
 }
 
-/// 首页主视觉：巨型标题 + 自动轮播。
+/// 首页主视觉：7 秒自动轮播 + 标准 Material 指示器。
 class HeroStage extends StatefulWidget {
   const HeroStage({
     super.key,
@@ -488,10 +370,15 @@ class _HeroStageState extends State<HeroStage> {
   @override
   Widget build(BuildContext context) {
     if (widget.items.isEmpty) return const SizedBox.shrink();
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
     final compact = PqAdaptive.isCompact(context);
     final height = compact ? 420.0 : 460.0;
     final item = widget.items[_index.clamp(0, widget.items.length - 1)];
+    final meta = <String>[
+      if (item.year != null && item.year!.isNotEmpty) item.year!,
+      if (item.area != null && item.area!.isNotEmpty) item.area!,
+      if (item.remarks != null && item.remarks!.isNotEmpty) item.remarks!,
+    ].join(' · ');
 
     return SizedBox(
       height: height,
@@ -505,112 +392,119 @@ class _HeroStageState extends State<HeroStage> {
                 setState(() => _index = i);
                 _userInteracted = true;
               },
-              itemBuilder: (context, i) => _HeroSlide(item: widget.items[i], compact: compact),
+              itemBuilder: (context, i) =>
+                  _HeroSlide(item: widget.items[i], compact: compact),
             ),
           ),
-          // 左侧文本层盖在遮罩上，保证可读性
           Positioned(
             left: PqAdaptive.gutter(context),
             right: PqAdaptive.gutter(context),
             bottom: compact ? 56 : 64,
-            child: IgnorePointer(
-              ignoring: false,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '本期主推 · ${item.kind ?? '精选'}',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: Colors.white70,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TweenAnimationBuilder<double>(
+                  key: ValueKey('${item.id}-t'),
+                  tween: Tween(begin: 0, end: 1),
+                  duration: const Duration(milliseconds: 520),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, t, child) => Opacity(
+                    opacity: t,
+                    child: Transform.translate(
+                      offset: Offset(0, 14 * (1 - t)),
+                      child: child,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        width: 18,
-                        height: 1,
-                        color: p.accent,
-                      ),
-                      const SizedBox(width: 8),
                       Text(
-                        '本期主推 · ${item.kind ?? '精选'}',
-                        style: PqType.eyebrow.copyWith(color: p.accent),
+                        item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.displaySmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (item.score != null && item.score!.isNotEmpty)
+                            PqTag(item.score!),
+                          if (meta.isNotEmpty)
+                            Text(
+                              meta,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: Colors.white70,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          FilledButton.icon(
+                            onPressed: () => widget.onPlay(item),
+                            icon: const Icon(Icons.play_arrow_rounded),
+                            label: const Text('立即播放'),
+                          ),
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            onPressed: () => widget.onDetail(item),
+                            icon: const Icon(Icons.info_outline_rounded),
+                            label: const Text('详情'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white70),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
-                  TweenAnimationBuilder<double>(
-                    key: ValueKey('${item.id}-t'),
-                    tween: Tween(begin: 0, end: 1),
-                    duration: const Duration(milliseconds: 520),
-                    curve: Curves.easeOutCubic,
-                    builder: (context, t, child) => Opacity(
-                      opacity: t,
-                      child: Transform.translate(
-                        offset: Offset(0, 14 * (1 - t)),
-                        child: child,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: PqType.hero.copyWith(
-                            fontSize: compact ? 38 : 54,
-                            color: p.text,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 10,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            if (item.score != null) PqTag(item.score!, color: p.accent, filled: true),
-                            if (item.year != null) Text('${item.year}', style: _meta(p)),
-                            if (item.area != null) Text('${item.area}', style: _meta(p)),
-                            if (item.remarks != null) Text('${item.remarks}', style: _meta(p)),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        Row(
-                          children: [
-                            _HeroButton(
-                              label: '立即播放',
-                              icon: Icons.play_arrow_rounded,
-                              primary: true,
-                              onTap: () => widget.onPlay(item),
-                            ),
-                            const SizedBox(width: 10),
-                            _HeroButton(
-                              label: '详情',
-                              icon: Icons.info_outline_rounded,
-                              onTap: () => widget.onDetail(item),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-          // 指示器
           Positioned(
             right: PqAdaptive.gutter(context),
-            bottom: 22,
+            bottom: 20,
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 for (var i = 0; i < widget.items.length; i++)
-                  GestureDetector(
-                    onTap: () => _go(i),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 260),
-                      curve: Curves.easeOutCubic,
-                      margin: const EdgeInsets.only(left: 6),
-                      width: i == _index ? 22 : 7,
-                      height: 3,
-                      decoration: BoxDecoration(
-                        color: i == _index ? p.accent : p.textFaint.withOpacity(0.35),
-                        borderRadius: BorderRadius.circular(2),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: InkWell(
+                      onTap: () => _go(i),
+                      customBorder: const StadiumBorder(),
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Center(
+                          child: Container(
+                            width: 24,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: i == _index
+                                  ? Colors.white
+                                  : Colors.white.withOpacity(0.32),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -621,12 +515,6 @@ class _HeroStageState extends State<HeroStage> {
       ),
     );
   }
-
-  TextStyle _meta(PqPalette p) => PqType.bodySmall.copyWith(
-        fontSize: 12.5,
-        color: p.textMuted,
-        letterSpacing: 0.2,
-      );
 }
 
 class _HeroSlide extends StatelessWidget {
@@ -637,7 +525,6 @@ class _HeroSlide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -647,31 +534,30 @@ class _HeroSlide extends StatelessWidget {
           radius: 0,
           glyphSize: 0.6,
         ),
-        // 垂直遮罩：底部压暗，顶部留一点光
+        // 封面遮罩：底部压黑保证文字可读，其余保持透明。
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                p.canvas.withOpacity(0.35),
-                p.canvas.withOpacity(0.15),
-                p.canvas.withOpacity(0.86),
-                p.canvas,
+                Colors.black.withOpacity(0.10),
+                Colors.black.withOpacity(0.0),
+                Colors.black.withOpacity(0.62),
+                Colors.black.withOpacity(0.92),
               ],
-              stops: const [0, 0.38, 0.82, 1],
+              stops: const [0, 0.35, 0.75, 1],
             ),
           ),
         ),
-        // 左侧横向遮罩，给文字留出干净区域
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
               colors: [
-                p.canvas.withOpacity(compact ? 0.72 : 0.82),
-                p.canvas.withOpacity(0.1),
+                Colors.black.withOpacity(compact ? 0.6 : 0.7),
+                Colors.black.withOpacity(0),
               ],
               stops: const [0, 0.72],
             ),
@@ -682,77 +568,7 @@ class _HeroSlide extends StatelessWidget {
   }
 }
 
-class _HeroButton extends StatefulWidget {
-  const _HeroButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.primary = false,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool primary;
-
-  @override
-  State<_HeroButton> createState() => _HeroButtonState();
-}
-
-class _HeroButtonState extends State<_HeroButton> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    final bg = widget.primary
-        ? p.accent
-        : (_hover ? Colors.white.withOpacity(0.16) : Colors.white.withOpacity(0.08));
-    final fg = widget.primary ? p.onAccent : p.text;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(11),
-            border: Border.all(
-              color: widget.primary ? p.accent : Colors.white.withOpacity(0.16),
-              width: 0.9,
-            ),
-            boxShadow: widget.primary
-                ? [
-                    BoxShadow(
-                      color: p.accent.withOpacity(_hover ? 0.35 : 0.18),
-                      blurRadius: 26,
-                      offset: const Offset(0, 10),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(widget.icon, size: 18, color: fg),
-              const SizedBox(width: 7),
-              Text(
-                widget.label,
-                style: PqType.label.copyWith(fontSize: 13, color: fg, fontWeight: FontWeight.w700),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 继续观看卡：横版 16:9，带进度条。
+/// 继续观看卡：Material 卡片 + 16:9 封面 + 进度条。
 class ContinueCard extends StatelessWidget {
   const ContinueCard({
     super.key,
@@ -773,63 +589,76 @@ class ContinueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return HoverZoom(
-      borderRadius: 14,
-      child: PqPressable(
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
         onTap: onTap,
-        borderRadius: 14,
         child: SizedBox(
           width: width,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               AspectRatio(
                 aspectRatio: 16 / 9,
-                child: SmartImage(
-                  url: posterUrl,
-                  title: title,
-                  radius: 14,
-                  dim: 0.12,
-                  child: Stack(
-                    children: [
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: ClipRRect(
-                          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 3,
-                            backgroundColor: Colors.white.withOpacity(0.18),
-                          ),
-                        ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    SmartImage(
+                      url: posterUrl,
+                      title: title,
+                      radius: 0,
+                    ),
+                    const Center(
+                      child: Icon(
+                        Icons.play_circle_fill_rounded,
+                        size: 40,
+                        color: Colors.white70,
                       ),
-                      const Center(
-                        child: Icon(
-                          Icons.play_circle_fill_rounded,
-                          size: 40,
-                          color: Colors.white70,
-                        ),
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 4,
+                        backgroundColor: Colors.black.withOpacity(0.32),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 9),
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: PqType.title.copyWith(fontSize: 13.5),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: PqType.bodySmall.copyWith(fontSize: 11.5, color: p.textFaint),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -845,13 +674,14 @@ class MetaDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Container(
         width: 3,
         height: 3,
         decoration: BoxDecoration(
-          color: PqPalette.of(context).textFaint,
+          color: scheme.onSurfaceVariant.withOpacity(0.5),
           shape: BoxShape.circle,
         ),
       ),

@@ -1,16 +1,16 @@
 {
-  "version": "1.0.0",
-  "tag": "v1.0.0",
+  "version": "1.1.0",
+  "tag": "v1.1.0",
   "channel": "stable",
-  "notes": "首个版本：插件工坊、局域网 MCP、设备同步、全站聚合搜索与播放器。",
-  "publishedAt": "2026-11-13T00:00:00Z",
-  "htmlUrl": "https://github.com/Mr-losfer/poqi/releases/tag/v1.0.0",
+  "notes": "修复新建插件与 MCP 写入静默失败；插件新增 JavaScript 引擎；首页与顶栏支持站点切换；界面改为标准 Material 3。",
+  "publishedAt": "2026-11-14T00:00:00Z",
+  "htmlUrl": "https://github.com/Mr-losfer/poqi/releases/tag/v1.1.0",
   "assets": [
     {
-      "name": "poqi-1.0.0.apk",
-      "url": "https://github.com/Mr-losfer/poqi/releases/download/v1.0.0/poqi-1.0.0.apk",
-      "size": 56363518,
-      "sha256": "38ab152e5cecc6f4ef2c23dac01f782bbdee6b0790791ea6b4ff71bdefca8b5e"
+      "name": "poqi-1.1.0.apk",
+      "url": "https://github.com/Mr-losfer/poqi/releases/download/v1.1.0/poqi-1.1.0.apk",
+      "size": 62088892,
+      "sha256": "45bce702d198896c23d53983b1596b6e411726199741f81a647335a1127917c2"
     }
   ]
 }

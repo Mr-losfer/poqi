@@ -9,6 +9,12 @@ enum PluginEngine {
   /// 通过 HTTP 抓取 + 声明式解析。
   http,
 
+  /// 通过 HTTP 抓取 + 内嵌 JavaScript 变换。
+  ///
+  /// 比声明式灵活得多：可以在脚本里做条件判断、字符串清洗、
+  /// 正则提取、多线路拆分，适合结构不规整的站点。
+  js,
+
   /// 内置演示引擎，随包分发，用于离线体验与规则演示。
   demo;
 
@@ -16,6 +22,8 @@ enum PluginEngine {
     switch (v) {
       case 'demo':
         return PluginEngine.demo;
+      case 'js':
+        return PluginEngine.js;
       default:
         return PluginEngine.http;
     }
@@ -23,6 +31,7 @@ enum PluginEngine {
 
   String get label => switch (this) {
         PluginEngine.http => 'HTTP',
+        PluginEngine.js => 'JavaScript',
         PluginEngine.demo => '演示',
       };
 }
@@ -159,7 +168,7 @@ class RequestSpec {
       );
 }
 
-enum ParseFormat { json, html, regex }
+enum ParseFormat { json, html, regex, split }
 
 class ParseSpec {
   const ParseSpec({
@@ -169,6 +178,11 @@ class ParseSpec {
     this.episodes,
     this.pattern,
     this.group = 1,
+    this.from,
+    this.lineNames,
+    this.lineSep = r'$$$',
+    this.itemSep = '#',
+    this.pairSep = r'$',
   });
 
   final ParseFormat format;
@@ -186,6 +200,15 @@ class ParseSpec {
   final String? pattern;
   final int group;
 
+  /// split 模式：对详情记录求值得到 `a$url#b$url` 形式的剧集串。
+  final String? from;
+
+  /// split 模式：线路名串，通常取 `vod_play_from`。
+  final String? lineNames;
+  final String lineSep;
+  final String itemSep;
+  final String pairSep;
+
   Map<String, dynamic> toJson() => {
         'format': format.name,
         if (root != null) 'root': root,
@@ -193,12 +216,18 @@ class ParseSpec {
         if (episodes != null) 'episodes': episodes!.toJson(),
         if (pattern != null) 'pattern': pattern,
         if (group != 1) 'group': group,
+        if (from != null) 'from': from,
+        if (lineNames != null) 'lineNames': lineNames,
+        if (lineSep != r'$$$') 'lineSep': lineSep,
+        if (itemSep != '#') 'itemSep': itemSep,
+        if (pairSep != r'$') 'pairSep': pairSep,
       };
 
   factory ParseSpec.fromJson(Map<String, dynamic> j) => ParseSpec(
         format: switch ('${j['format'] ?? 'json'}') {
           'html' => ParseFormat.html,
           'regex' => ParseFormat.regex,
+          'split' => ParseFormat.split,
           _ => ParseFormat.json,
         },
         root: j['root'] as String?,
@@ -208,6 +237,11 @@ class ParseSpec {
             : null,
         pattern: j['pattern'] as String?,
         group: (j['group'] as num?)?.toInt() ?? 1,
+        from: j['from'] as String?,
+        lineNames: j['lineNames'] as String?,
+        lineSep: '${j['lineSep'] ?? r'$$$'}',
+        itemSep: '${j['itemSep'] ?? '#'}',
+        pairSep: '${j['pairSep'] ?? r'$'}',
       );
 }
 
@@ -215,6 +249,7 @@ class EndpointSpec {
   const EndpointSpec({
     this.request = const RequestSpec(),
     this.parse,
+    this.js,
     this.filters = const [],
     this.pageStart = 1,
     this.pageSize,
@@ -222,13 +257,23 @@ class EndpointSpec {
 
   final RequestSpec request;
   final ParseSpec? parse;
+
+  /// `engine: js` 时调用的脚本函数名（如 `home` / `detail`）。
+  ///
+  /// 缺省时按端点名推断，所以大多数插件不用写这一项。
+  final String? js;
+
   final List<FilterGroup> filters;
   final int pageStart;
   final int? pageSize;
 
+  /// 该端点实际调用的 JS 函数名。
+  String jsFunctionFor(String endpoint) => (js == null || js!.isEmpty) ? endpoint : js!;
+
   Map<String, dynamic> toJson() => {
         'request': request.toJson(),
         if (parse != null) 'parse': parse!.toJson(),
+        if (js != null && js!.isNotEmpty) 'js': js,
         if (filters.isNotEmpty) 'filters': filters.map((e) => e.toJson()).toList(),
         if (pageStart != 1) 'pageStart': pageStart,
         if (pageSize != null) 'pageSize': pageSize,
@@ -241,6 +286,7 @@ class EndpointSpec {
         parse: j['parse'] is Map
             ? ParseSpec.fromJson((j['parse'] as Map).cast<String, dynamic>())
             : null,
+        js: j['js'] as String?,
         filters: (j['filters'] as List?)
                 ?.whereType<Map>()
                 .map((e) => FilterGroup.fromJson(e.cast<String, dynamic>()))
@@ -263,6 +309,7 @@ class PluginManifest {
     this.homepage = '',
     this.icon = '',
     this.engine = PluginEngine.http,
+    this.script = '',
     this.baseUrl = '',
     this.headers = const {},
     this.config = const [],
@@ -281,6 +328,10 @@ class PluginManifest {
   final String homepage;
   final String? icon;
   final PluginEngine engine;
+
+  /// `engine: js` 时的完整脚本（可含多个端点函数）。
+  final String script;
+
   final String baseUrl;
   final Map<String, String> headers;
   final List<ConfigField> config;
@@ -311,6 +362,7 @@ class PluginManifest {
     String? homepage,
     String? icon,
     PluginEngine? engine,
+    String? script,
     String? baseUrl,
     Map<String, String>? headers,
     List<ConfigField>? config,
@@ -329,6 +381,7 @@ class PluginManifest {
       homepage: homepage ?? this.homepage,
       icon: icon ?? this.icon,
       engine: engine ?? this.engine,
+      script: script ?? this.script,
       baseUrl: baseUrl ?? this.baseUrl,
       headers: headers ?? this.headers,
       config: config ?? this.config,
@@ -349,6 +402,7 @@ class PluginManifest {
         if (homepage.isNotEmpty) 'homepage': homepage,
         if (icon != null && icon!.isNotEmpty) 'icon': icon,
         'engine': engine.name,
+        if (script.isNotEmpty) 'script': script,
         'baseUrl': baseUrl,
         if (headers.isNotEmpty) 'headers': headers,
         if (config.isNotEmpty) 'config': config.map((e) => e.toJson()).toList(),
@@ -372,6 +426,7 @@ class PluginManifest {
       homepage: '${j['homepage'] ?? ''}',
       icon: j['icon'] as String?,
       engine: PluginEngine.parse(j['engine'] as String?),
+      script: '${j['script'] ?? ''}',
       baseUrl: '${j['baseUrl'] ?? ''}',
       headers: (j['headers'] as Map?)?.map((k, v) => MapEntry('$k', '$v')) ?? const {},
       config: (j['config'] as List?)

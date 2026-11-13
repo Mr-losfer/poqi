@@ -27,15 +27,21 @@ class JsonStore {
     }
   }
 
+  /// 返回**可变**列表。
+  ///
+  /// 这里曾经返回 `const []`，而所有调用方都是「取出 → add/remove → 写回」，
+  /// 于是任何 key 尚未写入过的首次保存都会抛
+  /// `Unsupported operation: Cannot add to an unmodifiable list`。
+  /// 表现为「新建插件点了没反应」（async 抛错无人接）与 MCP 写入失败。
   List<Map<String, dynamic>> getList(String key) {
     final raw = _prefs.getString(key);
-    if (raw == null || raw.isEmpty) return const [];
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
     try {
       final v = jsonDecode(raw);
-      if (v is! List) return const [];
+      if (v is! List) return <Map<String, dynamic>>[];
       return v.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
     } catch (_) {
-      return const [];
+      return <Map<String, dynamic>>[];
     }
   }
 

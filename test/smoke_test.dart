@@ -11,6 +11,8 @@ import 'package:poqi/data/backend.dart';
 import 'package:poqi/data/net/pq_http.dart';
 import 'package:poqi/data/repositories.dart';
 import 'package:poqi/data/store.dart';
+import 'package:poqi/domain/models/plugin.dart';
+import 'package:poqi/domain/models/site.dart';
 import 'package:poqi/domain/plugin/runner.dart';
 import 'package:poqi/state/providers.dart';
 
@@ -36,10 +38,24 @@ void main() {
     final store = await JsonStore.open();
     final settingsRepo = SettingsRepository(store);
     final siteRepo = SiteRepository(store);
+    final pluginRepo = PluginRepository(store);
     await siteRepo.seedIfEmpty();
+    // 内置源已换成真实 HTTP 插件，测试环境无网络；
+    // 额外挂一个演示引擎站点，保证首屏数据路径仍被覆盖。
+    await pluginRepo.save(PluginManifest.fromJsonString(_demoPluginJson));
+    await siteRepo.save(SiteBinding(
+      id: 'site_smoke_demo',
+      pluginId: 'poqi.demo.smoke',
+      name: '冒烟演示源',
+      baseUrl: 'https://demo.poqi.local',
+      order: -1,
+      config: const {},
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    ));
     backend = PoqiBackend(
       store: store,
-      pluginRepo: PluginRepository(store),
+      pluginRepo: pluginRepo,
       siteRepo: siteRepo,
       libraryRepo: LibraryRepository(store),
       settingsRepo: settingsRepo,
@@ -75,10 +91,10 @@ void main() {
   /// 而每次点击前目标 tab 必然处于未选中态，所以按描边图标定位最稳。
   Future<void> walkAllTabs(WidgetTester tester) async {
     const tabs = <(IconData, String, String?)>[
-      (Icons.grid_view_outlined, '分类', '分类'),
+      (Icons.grid_view_outlined, '分类', '跨站点浏览，一处筛选，全部源生效'),
       (Icons.extension_outlined, '插件', '插件工坊'),
-      (Icons.wifi_tethering_outlined, '连接', 'LOCAL NETWORK'),
-      (Icons.tune_outlined, '设置', 'PREFERENCES'),
+      (Icons.wifi_tethering_outlined, '连接', '同一 Wi-Fi 下，MCP 与数据同步都在本机完成'),
+      (Icons.tune_outlined, '设置', '改动即时生效，并保存在本机'),
       (Icons.home_outlined, '首页', null),
     ];
     for (final (icon, label, marker) in tabs) {
@@ -112,8 +128,8 @@ void main() {
       await unmount(tester);
     });
 
-    testWidgets('平板断点 900×1200：图标窄栏，五个 tab 可切换', (tester) async {
-      tester.view.physicalSize = const Size(900 * 2, 1200 * 2);
+    testWidgets('平板断点 700×1000：图标窄栏，五个 tab 可切换', (tester) async {
+      tester.view.physicalSize = const Size(700 * 2, 1000 * 2);
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
 
@@ -128,7 +144,7 @@ void main() {
       await unmount(tester);
     });
 
-    testWidgets('桌面断点 1440×900：展开侧栏，五个 tab 可切换', (tester) async {
+    testWidgets('桌面断点 1440×900：常驻抽屉，五个 tab 可切换', (tester) async {
       tester.view.physicalSize = const Size(1440, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -163,3 +179,25 @@ void main() {
     });
   });
 }
+
+/// 冒烟测试专用演示插件：仅提供 home 端点，数据由 DemoRunner 生成。
+const _demoPluginJson = '''
+{
+  "spec": 1,
+  "id": "poqi.demo.smoke",
+  "name": "冒烟演示源",
+  "version": "1.0.0",
+  "engine": "demo",
+  "baseUrl": "https://demo.poqi.local",
+  "endpoints": {
+    "home": {
+      "request": { "path": "/" },
+      "parse": {
+        "format": "json",
+        "root": "list",
+        "fields": { "id": "item.id", "title": "item.title" }
+      }
+    }
+  }
+}
+''';

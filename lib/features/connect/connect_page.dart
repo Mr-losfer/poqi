@@ -2,11 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/design/pq_theme.dart';
 import '../../core/ui/adaptive.dart';
-import '../../core/ui/motion.dart';
 import '../../core/ui/overlay.dart';
-import '../../core/ui/poster.dart';
 import '../../core/ui/primitives.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/sync.dart';
@@ -25,7 +22,6 @@ class ConnectPage extends ConsumerStatefulWidget {
 class _ConnectPageState extends ConsumerState<ConnectPage> {
   String _version = '';
   String? _busyPeerId;
-  bool _notesOpen = false;
 
   @override
   void initState() {
@@ -62,51 +58,41 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
   Widget build(BuildContext context) {
     final st = ref.watch(connectProvider);
     final settings = ref.watch(settingsProvider);
-    final compact = PqAdaptive.isCompact(context);
     final ip = st.localIps.isNotEmpty ? st.localIps.first : '';
 
     return PqBackdrop(
-      child: SingleChildScrollView(
+      child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.only(
-          top: compact ? MediaQuery.paddingOf(context).top + 14 : 20,
+          top: MediaQuery.paddingOf(context).top + 16,
           bottom: 48,
         ),
-        child: PqContent(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (compact) ...[
+        children: [
+          PqContent(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
                 const PqPageHeader(
-                  eyebrow: 'LOCAL NETWORK',
                   title: '连接',
                   subtitle: '同一 Wi-Fi 下，MCP 与数据同步都在本机完成',
                 ),
-                _IpChip(ip: ip, onCopy: () => _copy(ip, '局域网地址')),
-                const SizedBox(height: 22),
-              ] else
-                PqPageHeader(
-                  eyebrow: 'LOCAL NETWORK',
-                  title: '连接',
-                  subtitle: '同一 Wi-Fi 下，MCP 与数据同步都在本机完成',
-                  actions: [
-                    _IpChip(ip: ip, onCopy: () => _copy(ip, '局域网地址')),
-                  ],
-                ),
-              _serviceCards(context, st, settings, ip, compact),
-              const SizedBox(height: 34),
-              _peersSection(context, st, compact),
-              if (st.lastReport != null) ...[
-                const SizedBox(height: 20),
-                _ReportCard(report: st.lastReport!),
+                _serviceSection(context, st, settings, ip),
+                const SizedBox(height: 16),
+                _pairingCard(context, st),
+                const SizedBox(height: 32),
+                _peersSection(context, st),
+                if (st.lastReport != null) ...[
+                  const SizedBox(height: 24),
+                  _ReportCard(report: st.lastReport!),
+                ],
+                const SizedBox(height: 32),
+                _updateSection(context, st),
+                const SizedBox(height: 16),
+                _footer(context, settings, st),
               ],
-              const SizedBox(height: 34),
-              _updateSection(context, st, settings, compact),
-              const SizedBox(height: 30),
-              _footer(context, settings, st),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -115,21 +101,21 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
   // 服务卡
   // ---------------------------------------------------------------------------
 
-  Widget _serviceCards(
+  Widget _serviceSection(
     BuildContext context,
     ConnectState st,
     AppSettings settings,
     String ip,
-    bool compact,
   ) {
     final mcpPort = st.mcpRunning ? st.mcpPort : settings.mcpPort;
     final syncPort = st.syncRunning ? st.syncPort : settings.syncPort;
-    final flow = ip.isEmpty ? '127.0.0.1' : ip;
+    final host = ip.isEmpty ? '127.0.0.1' : ip;
 
     final mcp = _McpCard(
       running: st.mcpRunning,
+      host: host,
+      ip: ip,
       port: mcpPort,
-      endpoint: 'http://$flow:$mcpPort/mcp',
       onToggle: () {
         final c = ref.read(connectProvider.notifier);
         if (st.mcpRunning) {
@@ -138,14 +124,13 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
           c.startMcp(mcpPort);
         }
       },
-      onCopy: () => _copy('http://$flow:$mcpPort/mcp', 'MCP 地址'),
+      onCopy: _copy,
       onTools: () => _showTools(context),
     );
 
     final sync = _SyncCard(
       running: st.syncRunning,
       port: syncPort,
-      pin: st.pin.isEmpty ? '----' : st.pin,
       scanning: st.discoveryRunning,
       onToggle: () {
         final c = ref.read(connectProvider.notifier);
@@ -156,22 +141,21 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
         }
       },
       onScan: () => ref.read(connectProvider.notifier).startDiscovery(),
-      onCopyPin: () => _copy(st.pin, '配对码'),
+      onCopy: _copy,
     );
 
-    if (compact) {
-      return Column(children: [mcp, const SizedBox(height: 14), sync]);
-    }
     return LayoutBuilder(
       builder: (context, c) {
         if (c.maxWidth < 820) {
-          return Column(children: [mcp, const SizedBox(height: 14), sync]);
+          return Column(
+            children: [mcp, const SizedBox(height: 16), sync],
+          );
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(child: mcp),
-            const SizedBox(width: 14),
+            const SizedBox(width: 16),
             Expanded(child: sync),
           ],
         );
@@ -179,81 +163,110 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
     );
   }
 
+  Widget _pairingCard(BuildContext context, ConnectState st) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final pin = st.pin.isEmpty ? '----' : st.pin;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.pin_outlined, size: 20, color: scheme.primary),
+                const SizedBox(width: 8),
+                Text('配对码', style: theme.textTheme.titleMedium),
+                const Spacer(),
+                FilledButton.tonal(
+                  onPressed: () => _copy(st.pin, '配对码'),
+                  child: const Text('复制'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              pin,
+              style: theme.textTheme.displaySmall?.copyWith(
+                fontFamily: 'monospace',
+                letterSpacing: 8,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '两台设备填入同一个配对码即可互相发现并同步。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // 附近设备
   // ---------------------------------------------------------------------------
 
-  Widget _peersSection(BuildContext context, ConnectState st, bool compact) {
-    final p = PqPalette.of(context);
+  Widget _peersSection(BuildContext context, ConnectState st) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PqSectionHeader(
-          eyebrow: 'NEARBY',
-          title: '附近设备',
-          subtitle: st.peers.isEmpty ? null : '${st.peers.length} 台在线',
-          action: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (st.discoveryRunning) ...[
-                PqPulseDot(color: p.sage, size: 5),
-                const SizedBox(width: 6),
-                Text(
-                  '正在扫描',
-                  style: PqType.bodySmall.copyWith(color: p.sage, fontSize: 11.5),
-                ),
-                const SizedBox(width: 10),
-              ],
-              OutlinedButton.icon(
-                onPressed: st.discoveryRunning
-                    ? null
-                    : () => ref.read(connectProvider.notifier).startDiscovery(),
-                icon: const Icon(Icons.radar_rounded, size: 15),
-                label: Text(st.discoveryRunning ? '扫描中' : '扫描'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                  textStyle: PqType.label.copyWith(fontSize: 12),
+        Row(
+          children: [
+            Expanded(child: Text('附近设备', style: theme.textTheme.titleMedium)),
+            if (st.peers.isNotEmpty)
+              Text(
+                '${st.peers.length} 台在线',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
-            ],
-          ),
+          ],
         ),
-        const SizedBox(height: 12),
-        if (st.peers.isEmpty)
-          PqPanel(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: PqEmptyState(
-              icon: Icons.devices_other_rounded,
-              title: '还没有发现设备',
-              message: '在另一台设备上打开 Poqi 的连接页，或手动检查防火墙是否放行 UDP 47820。',
-              compact: true,
-              action: st.syncRunning
-                  ? null
-                  : TextButton(
-                      onPressed: () => ref
-                          .read(connectProvider.notifier)
-                          .startSync(ref.read(settingsProvider).syncPort),
-                      child: const Text('先启动同步服务'),
-                    ),
-            ),
-          )
-        else
-          Column(
+        const SizedBox(height: 8),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
             children: [
-              for (var i = 0; i < st.peers.length; i++)
-                Padding(
-                  padding: EdgeInsets.only(bottom: i == st.peers.length - 1 ? 0 : 10),
-                  child: _PeerTile(
+              if (st.discoveryRunning) const LinearProgressIndicator(minHeight: 2),
+              if (st.peers.isEmpty)
+                PqEmptyState(
+                  icon: Icons.devices_other_outlined,
+                  title: '还没有发现设备',
+                  message: '在另一台设备上打开 Poqi 的连接页，或检查防火墙是否放行 UDP 47820。',
+                  compact: true,
+                  action: st.syncRunning
+                      ? null
+                      : FilledButton.tonal(
+                          onPressed: () => ref
+                              .read(connectProvider.notifier)
+                              .startSync(ref.read(settingsProvider).syncPort),
+                          child: const Text('先启动同步服务'),
+                        ),
+                )
+              else
+                for (var i = 0; i < st.peers.length; i++) ...[
+                  if (i > 0) const Divider(height: 1),
+                  _PeerTile(
                     peer: st.peers[i],
-                    compact: compact,
                     busy: _busyPeerId == st.peers[i].id,
                     disabled: st.busy && _busyPeerId != st.peers[i].id,
                     onPull: () => _runPeer(st.peers[i], pull: true),
                     onPush: () => _runPeer(st.peers[i], pull: false),
                   ),
-                ),
+                ],
             ],
           ),
+        ),
       ],
     );
   }
@@ -279,223 +292,168 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
   // 更新
   // ---------------------------------------------------------------------------
 
-  Widget _updateSection(
-    BuildContext context,
-    ConnectState st,
-    AppSettings settings,
-    bool compact,
-  ) {
-    final p = PqPalette.of(context);
+  Widget _updateSection(BuildContext context, ConnectState st) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final outcome = st.update;
     final release = outcome?.release;
     final dl = st.download;
-    final downloading = st.busy &&
-        dl != null &&
-        dl.received > 0 &&
-        st.downloadedPath == null;
+    final downloading =
+        st.busy && dl != null && dl.received > 0 && st.downloadedPath == null;
+    final failed = outcome != null && outcome.failed;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        PqSectionHeader(
-          eyebrow: 'RELEASE',
-          title: '应用更新',
-          subtitle: _version.isEmpty ? null : 'v$_version',
-          action: OutlinedButton.icon(
-            onPressed: st.busy ? null : () => _checkUpdate(),
-            icon: st.busy && !downloading
-                ? const SizedBox(
-                    width: 13,
-                    height: 13,
-                    child: CircularProgressIndicator(strokeWidth: 1.8),
-                  )
-                : const Icon(Icons.refresh_rounded, size: 15),
-            label: const Text('检查更新'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              textStyle: PqType.label.copyWith(fontSize: 12),
+    final status = outcome == null
+        ? '尚未检查更新'
+        : release != null
+            ? '新版本 ${release.version} 可用'
+            : failed
+                ? '检查未完成'
+                : '已是最新版本';
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.system_update_alt),
+            title: const Text('应用更新'),
+            subtitle: Text(
+              status,
+              style: failed ? TextStyle(color: scheme.error) : null,
+            ),
+            trailing: FilledButton(
+              onPressed: st.busy ? null : () => _checkUpdate(),
+              child: st.busy && !downloading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('检查更新'),
             ),
           ),
-        ),
-        const SizedBox(height: 12),
-        PqPanel(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('当前版本'),
+            trailing: Text('v${_version.isEmpty ? '—' : _version}'),
+          ),
+          if (st.updateError != null && !downloading && !failed)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                st.updateError!,
+                style: theme.textTheme.bodySmall?.copyWith(color: scheme.error),
+              ),
+            ),
+          if (release != null) ...[
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.new_releases_outlined),
+              title: Text('新版本 ${release.version}'),
+              subtitle: Text('发布于 ${_fmtDate(release.publishedAt)}'),
+            ),
+            if (release.notes.trim().isNotEmpty)
+              ExpansionTile(
+                leading: const Icon(Icons.notes),
+                title: const Text('更新说明'),
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: p.surfaceHigh,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: p.lineSoft, width: 0.9),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        release.notes.trim(),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          height: 1.6,
+                        ),
+                      ),
                     ),
-                    child: Icon(Icons.system_update_alt_rounded, size: 19, color: p.textMuted),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ],
+              ),
+            if (release.assets.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.attachment),
+                title: const Text('安装包'),
+                subtitle: Text(
+                  release.assets
+                      .take(3)
+                      .map((a) => '${a.name} · ${_fmtBytes(a.size)}')
+                      .join('\n'),
+                ),
+                isThreeLine: release.assets.length > 1,
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (downloading) ...[
+                    Row(
                       children: [
                         Text(
-                          release != null ? '新版本 ${release.version}' : '当前版本 v${_version.isEmpty ? '—' : _version}',
-                          style: PqType.title.copyWith(fontSize: 14),
+                          '下载中 ${(dl.fraction * 100).round()}%',
+                          style: theme.textTheme.labelLarge,
                         ),
-                        const SizedBox(height: 3),
+                        const Spacer(),
                         Text(
-                          release != null
-                              ? '发布于 ${_fmtDate(release.publishedAt)}'
-                              : (outcome == null
-                                  ? '尚未检查更新'
-                                  : outcome.failed
-                                      ? '检查未完成'
-                                      : '已是最新版本'),
-                          style: PqType.bodySmall.copyWith(
-                            color: outcome != null && outcome.failed && release == null
-                                ? p.danger
-                                : p.textFaint,
+                          '${_fmtBytes(dl.received)} / ${_fmtBytes(dl.total)}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  if (release == null && outcome != null && !outcome.failed)
-                    PqTag('最新', color: p.sage, filled: true, icon: Icons.check_rounded),
-                ],
-              ),
-              if (st.updateError != null && !downloading) ...[
-                const SizedBox(height: 12),
-                Text(
-                  st.updateError!,
-                  style: PqType.bodySmall.copyWith(color: p.danger, fontSize: 12),
-                ),
-              ],
-              if (release != null) ...[
-                const SizedBox(height: 16),
-                Divider(color: p.lineSoft, height: 1),
-                const SizedBox(height: 14),
-                if (release.notes.trim().isNotEmpty) ...[
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _notesOpen = !_notesOpen),
-                    child: Row(
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(value: dl.fraction, minHeight: 6),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${(dl.speedBps / 1024 / 1024).toStringAsFixed(1)} MB/s · '
+                      '${dl.viaProxy ? 'via gh-proxy' : '直连'}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ] else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Text(
-                          '更新说明',
-                          style: PqType.label.copyWith(color: p.textMuted, fontSize: 11.5),
-                        ),
-                        const SizedBox(width: 6),
-                        AnimatedRotation(
-                          turns: _notesOpen ? 0.5 : 0,
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeOutCubic,
-                          child: Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: p.textFaint),
+                        if (st.downloadedPath != null)
+                          FilledButton.icon(
+                            onPressed: () =>
+                                ref.read(connectProvider.notifier).installDownloaded(),
+                            icon: const Icon(Icons.install_desktop, size: 18),
+                            label: const Text('安装'),
+                          )
+                        else
+                          FilledButton.icon(
+                            onPressed: st.busy
+                                ? null
+                                : () => ref
+                                    .read(connectProvider.notifier)
+                                    .downloadUpdate(release),
+                            icon: const Icon(Icons.download, size: 18),
+                            label: const Text('下载'),
+                          ),
+                        TextButton(
+                          onPressed: () => ref
+                              .read(connectProvider.notifier)
+                              .openReleasePage(release.htmlUrl),
+                          child: const Text('前往发布页'),
                         ),
                       ],
                     ),
-                  ),
-                  AnimatedCrossFade(
-                    firstChild: const SizedBox(width: double.infinity),
-                    secondChild: Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        release.notes.trim(),
-                        maxLines: 12,
-                        overflow: TextOverflow.ellipsis,
-                        style: PqType.bodySmall.copyWith(color: p.textMuted, height: 1.65),
-                      ),
-                    ),
-                    crossFadeState:
-                        _notesOpen ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                    duration: const Duration(milliseconds: 200),
-                  ),
-                  const SizedBox(height: 14),
                 ],
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final a in release.assets.take(3))
-                      PqTag('${a.name} · ${_fmtBytes(a.size)}', icon: Icons.download_rounded),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                if (downloading) ...[
-                  PqProgressLine(value: dl.fraction, height: 3),
-                  const SizedBox(height: 9),
-                  Row(
-                    children: [
-                      Text(
-                        '${_fmtBytes(dl.received)} / ${_fmtBytes(dl.total)}',
-                        style: PqType.mono.copyWith(fontSize: 11, color: p.textMuted),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        '${(dl.speedBps / 1024 / 1024).toStringAsFixed(1)} MB/s',
-                        style: PqType.mono.copyWith(fontSize: 11, color: p.textFaint),
-                      ),
-                      const Spacer(),
-                      PqTag(dl.viaProxy ? 'via gh-proxy' : '直连', color: p.textFaint),
-                    ],
-                  ),
-                ] else if (st.downloadedPath != null) ...[
-                  Row(
-                    children: [
-                      PqTag('已下载', color: p.sage, filled: true, icon: Icons.check_rounded),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          st.downloadedPath!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: PqType.mono.copyWith(fontSize: 10.5, color: p.textFaint),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      FilledButton.icon(
-                        onPressed: () => ref.read(connectProvider.notifier).installDownloaded(),
-                        icon: const Icon(Icons.install_desktop_rounded, size: 16),
-                        label: const Text('安装'),
-                      ),
-                      const SizedBox(width: 10),
-                      TextButton(
-                        onPressed: () => ref.read(connectProvider.notifier).openReleasePage(release.htmlUrl),
-                        child: const Text('或前往发布页'),
-                      ),
-                    ],
-                  ),
-                ] else
-                  Row(
-                    children: [
-                      FilledButton.icon(
-                        onPressed: st.busy
-                            ? null
-                            : () => ref.read(connectProvider.notifier).downloadUpdate(release),
-                        icon: const Icon(Icons.download_rounded, size: 16),
-                        label: const Text('下载'),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '下载后可直接安装，也可前往发布页手动获取。',
-                          style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
-            ],
-          ),
-        ),
-      ],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -516,46 +474,31 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
   // ---------------------------------------------------------------------------
 
   Widget _footer(BuildContext context, AppSettings settings, ConnectState st) {
-    final p = PqPalette.of(context);
-    final slug = '${settings.repoOwner}/${settings.repoName}';
+    final theme = Theme.of(context);
     final releaseUrl = st.update?.release?.htmlUrl ?? '';
-    final fallback = 'https://github.com/${settings.repoOwner}/${settings.repoName}/releases';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Divider(color: p.lineSoft, height: 1),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Icon(Icons.commit_rounded, size: 13, color: p.textFaint),
-            const SizedBox(width: 8),
-            Text(
-              slug,
-              style: PqType.mono.copyWith(fontSize: 11, color: p.textFaint),
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: () => ref
-                  .read(connectProvider.notifier)
-                  .openReleasePage(releaseUrl.isEmpty ? fallback : releaseUrl),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(
-                '打开发布页',
-                style: PqType.bodySmall.copyWith(color: p.textMuted, fontSize: 11.5),
-              ),
-            ),
-          ],
+    final fallback =
+        'https://github.com/${settings.repoOwner}/${settings.repoName}/releases';
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        leading: const Icon(Icons.commit),
+        title: Text(
+          '${settings.repoOwner}/${settings.repoName}',
+          style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
         ),
-      ],
+        subtitle: const Text('开源仓库'),
+        trailing: TextButton(
+          onPressed: () => ref
+              .read(connectProvider.notifier)
+              .openReleasePage(releaseUrl.isEmpty ? fallback : releaseUrl),
+          child: const Text('发布页'),
+        ),
+      ),
     );
   }
 
   void _showTools(BuildContext context) {
-    final p = PqPalette.of(context);
     const tools = <(String, String)>[
       ('poqi_search', '按关键词跨站搜索，返回聚合后的条目与来源站点。'),
       ('poqi_get_detail', '读取单个剧集的详情、线路与剧集列表。'),
@@ -570,55 +513,35 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
       context,
       title: 'MCP 工具清单',
       maxWidth: 620,
-      builder: (ctx) => SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        final mono = theme.textTheme.bodySmall?.copyWith(
+          fontFamily: 'monospace',
+          fontWeight: FontWeight.w600,
+          color: theme.colorScheme.onSurface,
+        );
+        return ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 16),
           children: [
-            Text(
-              '任意 MCP 客户端（Claude、Cursor、自建 Agent）连上这个地址后，即可调用以下工具。',
-              style: PqType.bodySmall.copyWith(color: p.textMuted, height: 1.65),
-            ),
-            const SizedBox(height: 16),
-            for (final t in tools)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      margin: const EdgeInsets.only(top: 6),
-                      decoration: BoxDecoration(shape: BoxShape.circle, color: p.sage.withOpacity(0.7)),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            t.$1,
-                            style: PqType.mono.copyWith(
-                              fontSize: 12,
-                              color: p.text,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            t.$2,
-                            style: PqType.bodySmall.copyWith(color: p.textMuted, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '任意 MCP 客户端（Claude、Cursor、自建 Agent）连上这个地址后，即可调用以下工具。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.6,
                 ),
               ),
+            ),
+            for (final t in tools)
+              ListTile(
+                title: Text(t.$1, style: mono),
+                subtitle: Text(t.$2),
+              ),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -653,127 +576,118 @@ String _fmtDate(DateTime? d) {
   return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
 }
 
-class _IpChip extends StatelessWidget {
-  const _IpChip({required this.ip, required this.onCopy});
-
-  final String ip;
-  final VoidCallback onCopy;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(11, 6, 4, 6),
-      decoration: BoxDecoration(
-        color: p.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.lineSoft, width: 0.9),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.lan_outlined, size: 14, color: p.textFaint),
-          const SizedBox(width: 7),
-          Text(
-            ip.isEmpty ? '未获取局域网地址' : ip,
-            style: PqType.mono.copyWith(
-              fontSize: 11.5,
-              color: ip.isEmpty ? p.textFaint : p.text,
-            ),
-          ),
-          const SizedBox(width: 2),
-          PqIconButton(
-            icon: Icons.copy_rounded,
-            iconSize: 14,
-            size: 28,
-            tooltip: '复制地址',
-            onTap: ip.isEmpty ? null : onCopy,
-          ),
-        ],
-      ),
-    );
-  }
+TextStyle? _monoStyle(BuildContext context, {Color? color}) {
+  final base = Theme.of(context).textTheme.bodySmall ?? const TextStyle();
+  return base.copyWith(
+    fontFamily: 'monospace',
+    fontFamilyFallback: const ['Roboto Mono', 'Menlo', 'Consolas'],
+    color: color,
+  );
 }
 
 class _McpCard extends StatelessWidget {
   const _McpCard({
     required this.running,
+    required this.host,
+    required this.ip,
     required this.port,
-    required this.endpoint,
     required this.onToggle,
     required this.onCopy,
     required this.onTools,
   });
 
   final bool running;
+  final String host;
+  final String ip;
   final int port;
-  final String endpoint;
   final VoidCallback onToggle;
-  final VoidCallback onCopy;
+  final void Function(String text, String label) onCopy;
   final VoidCallback onTools;
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return PqPanel(
-      padding: const EdgeInsets.all(18),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final mono = _monoStyle(context);
+    final endpoint = 'http://$host:$port/mcp';
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          SwitchListTile(
+            secondary: Icon(
+              Icons.dns_outlined,
+              color: running ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+            title: const Text('局域网 MCP'),
+            subtitle: const Text('把 Poqi 的检索与插件能力交给任意 MCP 客户端。'),
+            value: running,
+            onChanged: (_) => onToggle(),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.lan_outlined),
+            title: const Text('局域网地址'),
+            subtitle: Text(
+              ip.isEmpty ? '未获取' : ip,
+              style: mono,
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy, size: 20),
+              tooltip: '复制局域网地址',
+              onPressed: ip.isEmpty ? null : () => onCopy(ip, '局域网地址'),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.link),
+            title: const Text('MCP 地址'),
+            subtitle: Text(endpoint, style: mono),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy, size: 20),
+              tooltip: '复制 MCP 地址',
+              onPressed: () => onCopy(endpoint, 'MCP 地址'),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.numbers),
+            title: const Text('端口'),
+            subtitle: Text('$port', style: mono),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy, size: 20),
+              tooltip: '复制端口',
+              onPressed: () => onCopy('$port', '端口'),
+            ),
+          ),
+          const Divider(height: 1),
+          ExpansionTile(
+            leading: const Icon(Icons.api),
+            title: const Text('MCP 端点'),
+            subtitle: const Text('3 个端点 · 8 个工具'),
+            childrenPadding: const EdgeInsets.only(bottom: 8),
             children: [
-              PqPulseDot(color: running ? p.sage : p.textFaint, size: 6),
-              const SizedBox(width: 4),
-              Text('MCP 服务', style: PqType.title.copyWith(fontSize: 15)),
-              const Spacer(),
-              PqTag(
-                running ? '运行中' : '已停止',
-                color: running ? p.sage : p.textFaint,
-                filled: running,
+              ListTile(
+                title: Text('POST /mcp', style: mono),
+                subtitle: const Text('JSON-RPC 2.0 入口 · 8 个工具'),
+              ),
+              ListTile(
+                title: Text('GET /mcp/tools', style: mono),
+                subtitle: const Text('工具索引 · 8 个工具'),
+              ),
+              ListTile(
+                title: Text('GET /mcp/sse', style: mono),
+                subtitle: const Text('SSE 事件流 · 长连接'),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            '把 Poqi 的检索与插件能力，交给任意 MCP 客户端。',
-            style: PqType.bodySmall.copyWith(color: p.textMuted, fontSize: 12),
-          ),
-          const SizedBox(height: 16),
-          _EndpointBox(text: endpoint, onCopy: onCopy),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              _Metric(label: '端口', value: '$port'),
-              const SizedBox(width: 20),
-              const _Metric(label: '协议', value: 'JSON-RPC'),
-              const Spacer(),
-              Text(
-                running ? '仅本机网络可见' : '启动后可复制地址',
-                style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _ToggleButton(
-                  running: running,
-                  startLabel: '启动服务',
-                  stopLabel: '停止服务',
-                  onTap: onToggle,
-                ),
-              ),
-              const SizedBox(width: 10),
-              OutlinedButton.icon(
-                onPressed: onTools,
-                icon: const Icon(Icons.list_alt_rounded, size: 15),
-                label: const Text('工具清单'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                ),
-              ),
-            ],
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.list_alt_outlined),
+            title: const Text('工具清单'),
+            subtitle: const Text('查看每个工具的名称与用途'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: onTools,
           ),
         ],
       ),
@@ -785,223 +699,63 @@ class _SyncCard extends StatelessWidget {
   const _SyncCard({
     required this.running,
     required this.port,
-    required this.pin,
     required this.scanning,
     required this.onToggle,
     required this.onScan,
-    required this.onCopyPin,
+    required this.onCopy,
   });
 
   final bool running;
   final int port;
-  final String pin;
   final bool scanning;
   final VoidCallback onToggle;
   final VoidCallback onScan;
-  final VoidCallback onCopyPin;
+  final void Function(String text, String label) onCopy;
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return PqPanel(
-      padding: const EdgeInsets.all(18),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final mono = _monoStyle(context);
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              PqPulseDot(color: running ? p.sage : p.textFaint, size: 6),
-              const SizedBox(width: 4),
-              Text('同步服务', style: PqType.title.copyWith(fontSize: 15)),
-              const Spacer(),
-              PqTag(
-                running ? '运行中' : '已停止',
-                color: running ? p.sage : p.textFaint,
-                filled: running,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '在设备之间合并插件、站点、收藏与观看历史。',
-            style: PqType.bodySmall.copyWith(color: p.textMuted, fontSize: 12),
-          ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: p.surfaceHigh.withOpacity(p.isDark ? 1 : 0.7),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: p.lineSoft, width: 0.9),
+          SwitchListTile(
+            secondary: Icon(
+              Icons.sync_outlined,
+              color: running ? scheme.primary : scheme.onSurfaceVariant,
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '配对码',
-                      style: PqType.eyebrow.copyWith(color: p.textFaint, fontSize: 9.5),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      pin,
-                      style: PqType.mono.copyWith(
-                        fontSize: 26,
-                        height: 1.1,
-                        letterSpacing: 7,
-                        fontWeight: FontWeight.w600,
-                        color: running ? p.accent : p.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                PqIconButton(
-                  icon: Icons.copy_rounded,
-                  iconSize: 15,
-                  size: 32,
-                  tooltip: '复制配对码',
-                  onTap: onCopyPin,
-                ),
-              ],
+            title: const Text('设备同步'),
+            subtitle: const Text('在设备之间合并插件、站点、收藏与观看历史。'),
+            value: running,
+            onChanged: (_) => onToggle(),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.numbers),
+            title: const Text('端口'),
+            subtitle: Text('$port', style: mono),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy, size: 20),
+              tooltip: '复制端口',
+              onPressed: () => onCopy('$port', '端口'),
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _Metric(label: '端口', value: '$port'),
-              const SizedBox(width: 20),
-              _Metric(label: '发现', value: scanning ? '广播中' : '未开启'),
-            ],
+          ListTile(
+            leading: const Icon(Icons.radar),
+            title: const Text('设备发现'),
+            subtitle: Text(scanning ? '正在扫描附近设备…' : '未在扫描'),
+            trailing: TextButton(
+              onPressed: scanning ? null : onScan,
+              child: Text(scanning ? '扫描中' : '扫描'),
+            ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _ToggleButton(
-                  running: running,
-                  startLabel: '启动服务',
-                  stopLabel: '停止服务',
-                  onTap: onToggle,
-                ),
-              ),
-              const SizedBox(width: 10),
-              OutlinedButton.icon(
-                onPressed: onScan,
-                icon: scanning
-                    ? const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 1.6),
-                      )
-                    : const Icon(Icons.radar_rounded, size: 15),
-                label: Text(scanning ? '扫描中' : '扫描设备'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                ),
-              ),
-            ],
-          ),
+          if (scanning) const LinearProgressIndicator(minHeight: 2),
         ],
       ),
-    );
-  }
-}
-
-class _ToggleButton extends StatelessWidget {
-  const _ToggleButton({
-    required this.running,
-    required this.startLabel,
-    required this.stopLabel,
-    required this.onTap,
-  });
-
-  final bool running;
-  final String startLabel;
-  final String stopLabel;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    if (running) {
-      return OutlinedButton.icon(
-        onPressed: onTap,
-        icon: Icon(Icons.stop_rounded, size: 16, color: p.danger),
-        label: Text(stopLabel, style: PqType.label.copyWith(fontSize: 12.5, color: p.danger)),
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 13),
-          side: BorderSide(color: p.danger.withOpacity(0.35)),
-        ),
-      );
-    }
-    return FilledButton.icon(
-      onPressed: onTap,
-      icon: const Icon(Icons.play_arrow_rounded, size: 17),
-      label: Text(startLabel),
-      style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13)),
-    );
-  }
-}
-
-class _EndpointBox extends StatelessWidget {
-  const _EndpointBox({required this.text, required this.onCopy});
-
-  final String text;
-  final VoidCallback onCopy;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 7, 5, 7),
-      decoration: BoxDecoration(
-        color: p.surfaceHigh,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.lineSoft, width: 0.9),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: PqType.mono.copyWith(fontSize: 11.5, color: p.textMuted),
-            ),
-          ),
-          PqIconButton(
-            icon: Icons.copy_rounded,
-            iconSize: 14,
-            size: 28,
-            tooltip: '复制',
-            onTap: onCopy,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Metric extends StatelessWidget {
-  const _Metric({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: PqType.eyebrow.copyWith(fontSize: 9, color: p.textFaint)),
-        const SizedBox(height: 4),
-        Text(value, style: PqType.mono.copyWith(fontSize: 12.5, color: p.text)),
-      ],
     );
   }
 }
@@ -1009,7 +763,6 @@ class _Metric extends StatelessWidget {
 class _PeerTile extends StatelessWidget {
   const _PeerTile({
     required this.peer,
-    required this.compact,
     required this.busy,
     required this.disabled,
     required this.onPull,
@@ -1017,7 +770,6 @@ class _PeerTile extends StatelessWidget {
   });
 
   final SyncPeer peer;
-  final bool compact;
   final bool busy;
   final bool disabled;
   final VoidCallback onPull;
@@ -1025,138 +777,51 @@ class _PeerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
     final meta = [
       if (peer.platform.isNotEmpty) peer.platform,
       if (peer.version.isNotEmpty) 'v${peer.version}',
       if (peer.rttMs != null) '${peer.rttMs} ms',
       if (peer.lastSeen != null) _ago(peer.lastSeen!),
     ].join(' · ');
+    final subtitle = [
+      '${peer.host}:${peer.port}',
+      if (meta.isNotEmpty) meta,
+    ].join(' · ');
 
-    final info = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Flexible(
-              child: Text(
-                peer.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: PqType.title.copyWith(fontSize: 13.5),
-              ),
-            ),
-            const SizedBox(width: 8),
-            if (peer.rttMs != null)
-              PqTag(
-                peer.rttMs! < 80 ? '低延迟' : '在线',
-                color: peer.rttMs! < 80 ? p.sage : p.textFaint,
-              ),
-          ],
-        ),
-        const SizedBox(height: 3),
-        Text(
-          meta.isEmpty ? '未知平台' : meta,
-          style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '${peer.host}:${peer.port}',
-          style: PqType.mono.copyWith(fontSize: 11, color: p.textMuted),
-        ),
-      ],
-    );
-
-    final actions = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (busy)
-          const Padding(
-            padding: EdgeInsets.only(right: 10),
-            child: SizedBox(
-              width: 13,
-              height: 13,
-              child: CircularProgressIndicator(strokeWidth: 1.8),
-            ),
-          ),
-        _PeerButton(label: '拉取', icon: Icons.south_rounded, onTap: disabled || busy ? null : onPull),
-        const SizedBox(width: 8),
-        _PeerButton(label: '推送', icon: Icons.north_rounded, onTap: disabled || busy ? null : onPush),
-      ],
-    );
-
-    return PqPanel(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-      child: compact
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    PqMonogram(text: peer.name, size: 36),
-                    const SizedBox(width: 11),
-                    Expanded(child: info),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Align(alignment: Alignment.centerRight, child: actions),
-              ],
-            )
-          : Row(
-              children: [
-                PqMonogram(text: peer.name, size: 38),
-                const SizedBox(width: 12),
-                Expanded(child: info),
-                const SizedBox(width: 12),
-                actions,
-              ],
-            ),
-    );
-  }
-}
-
-class _PeerButton extends StatelessWidget {
-  const _PeerButton({required this.label, required this.icon, this.onTap});
-
-  final String label;
-  final IconData icon;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    final enabled = onTap != null;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: enabled ? p.surfaceHigh : Colors.transparent,
-          borderRadius: BorderRadius.circular(9),
-          border: Border.all(
-            color: enabled ? p.line : p.lineSoft.withOpacity(0.6),
-            width: 0.9,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 13, color: enabled ? p.textMuted : p.textFaint.withOpacity(0.5)),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: PqType.label.copyWith(
-                fontSize: 11.5,
-                color: enabled ? p.text : p.textFaint.withOpacity(0.5),
-              ),
-            ),
-          ],
-        ),
+    return ListTile(
+      leading: CircleAvatar(
+        child: Text(peer.name.isEmpty ? '?' : peer.name.substring(0, 1)),
       ),
+      title: Text(peer.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(subtitle),
+      trailing: busy
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : MenuAnchor(
+              menuChildren: [
+                MenuItemButton(
+                  leadingIcon: const Icon(Icons.south),
+                  onPressed: disabled ? null : onPull,
+                  child: const Text('从该设备拉取'),
+                ),
+                MenuItemButton(
+                  leadingIcon: const Icon(Icons.north),
+                  onPressed: disabled ? null : onPush,
+                  child: const Text('推送到该设备'),
+                ),
+              ],
+              builder: (context, controller, child) => FilledButton.tonal(
+                onPressed: disabled
+                    ? null
+                    : () => controller.isOpen
+                        ? controller.close()
+                        : controller.open(),
+                child: const Text('同步'),
+              ),
+            ),
     );
   }
 }
@@ -1168,7 +833,8 @@ class _ReportCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final entries = <(String, int)>[
       ('新增插件', report.pluginsAdded),
       ('更新插件', report.pluginsUpdated),
@@ -1179,63 +845,42 @@ class _ReportCard extends StatelessWidget {
       ('跳过', report.skipped),
     ].where((e) => e.$2 > 0).toList();
 
-    return PqPanel(
-      padding: const EdgeInsets.all(18),
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(Icons.swap_horiz_rounded, size: 17, color: p.sage),
-              const SizedBox(width: 8),
-              Text('上次同步结果', style: PqType.title.copyWith(fontSize: 13.5)),
-              const Spacer(),
-              Text(
-                '共 ${report.total} 项变更',
-                style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
+          ListTile(
+            leading: Icon(Icons.swap_horiz, color: scheme.tertiary),
+            title: const Text('上次同步结果'),
+            trailing: Text(
+              '共 ${report.total} 项变更',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
               ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (entries.isEmpty)
-            Text(
-              '两端已完全一致，没有需要合并的内容。',
-              style: PqType.bodySmall.copyWith(color: p.textMuted),
-            )
-          else
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final e in entries)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: p.surfaceHigh,
-                      borderRadius: BorderRadius.circular(9),
-                      border: Border.all(color: p.lineSoft, width: 0.9),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          e.$1,
-                          style: PqType.bodySmall.copyWith(color: p.textMuted, fontSize: 11.5),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '+${e.$2}',
-                          style: PqType.mono.copyWith(
-                            fontSize: 12,
-                            color: e.$1 == '跳过' ? p.textFaint : p.sage,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
             ),
+          ),
+          if (entries.isEmpty)
+            const PqEmptyState(
+              icon: Icons.check_circle_outline,
+              title: '两端已完全一致',
+              message: '没有需要合并的内容。',
+              compact: true,
+            )
+          else ...[
+            const Divider(height: 1),
+            for (final e in entries)
+              ListTile(
+                dense: true,
+                title: Text(e.$1),
+                trailing: Text(
+                  e.$1 == '跳过' ? '${e.$2}' : '+${e.$2}',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: e.$1 == '跳过' ? scheme.onSurfaceVariant : scheme.tertiary,
+                  ),
+                ),
+              ),
+          ],
         ],
       ),
     );

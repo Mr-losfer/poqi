@@ -2,64 +2,64 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/design/pq_theme.dart';
 import '../../core/ui/adaptive.dart';
-import '../../core/ui/logo.dart';
 import '../../core/ui/motion.dart';
 import '../../core/ui/primitives.dart';
 import '../../core/ui/states.dart';
 import '../../domain/models/library.dart';
 import '../../domain/models/media.dart';
+import '../../domain/models/site.dart';
 import '../../state/home_search.dart';
 import '../../state/player.dart';
 import '../../state/providers.dart';
 import '../media/nav.dart';
 import '../media/widgets.dart';
 
+/// 首页：主视觉 + 类型快捷入口 + 继续观看 + 分区轨道。
+///
+/// 外壳已经提供 AppBar，页面自身不再画 header，直接从第一个区块开始。
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final p = PqPalette.of(context);
-    final compact = PqAdaptive.isCompact(context);
+    final scheme = Theme.of(context).colorScheme;
     final feed = ref.watch(homeProvider);
     final history = ref.watch(historyProvider);
 
     return PqBackdrop(
-      child: RefreshIndicator(
-        color: p.accent,
-        backgroundColor: p.surfaceHigh,
-        onRefresh: () async {
-          ref.invalidate(homeProvider);
-          await ref.read(homeProvider.future);
-        },
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            if (compact)
-              SliverToBoxAdapter(child: _MobileHeader())
-            else
-              const SliverToBoxAdapter(child: SizedBox(height: 20)),
-            ...feed.when(
-              loading: () => [_skeleton(context, compact)],
-              error: (e, _) => [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: PqAdaptive.gutter(context)),
-                    child: PqErrorState(
-                      message: '$e',
-                      onRetry: () => ref.invalidate(homeProvider),
+      child: SafeArea(
+        bottom: false,
+        child: RefreshIndicator(
+          color: scheme.primary,
+          backgroundColor: scheme.surfaceContainerHigh,
+          onRefresh: () async {
+            ref.invalidate(homeProvider);
+            await ref.read(homeProvider.future);
+          },
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+              ...feed.when(
+                loading: () => [_skeleton()],
+                error: (e, _) => [
+                  SliverToBoxAdapter(
+                    child: PqContent(
+                      child: PqErrorState(
+                        message: '$e',
+                        onRetry: () => ref.invalidate(homeProvider),
+                      ),
                     ),
                   ),
-                ),
-              ],
-              data: (data) => _content(context, ref, data, history, compact),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 48)),
-            SliverToBoxAdapter(child: _Footer(stats: feed.valueOrNull)),
-            const SliverToBoxAdapter(child: SizedBox(height: 32)),
-          ],
+                ],
+                data: (data) => _content(context, ref, data, history),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+              SliverToBoxAdapter(child: PqContent(child: _Footer(stats: feed.valueOrNull))),
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            ],
+          ),
         ),
       ),
     );
@@ -70,7 +70,6 @@ class HomePage extends ConsumerWidget {
     WidgetRef ref,
     HomeData data,
     List<HistoryEntry> history,
-    bool compact,
   ) {
     final slivers = <Widget>[];
 
@@ -94,28 +93,64 @@ class HomePage extends ConsumerWidget {
     if (data.featured.isNotEmpty) {
       slivers.add(
         SliverToBoxAdapter(
-          child: HeroStage(
-            items: data.featured,
-            onPlay: (item) => openPlay(context, ref, item),
-            onDetail: (item) => openDetail(context, item),
+          child: PqContent(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: HeroStage(
+                items: data.featured,
+                onPlay: (item) => openPlay(context, ref, item),
+                onDetail: (item) => openDetail(context, item),
+              ),
+            ),
           ),
         ),
       );
     }
 
-    // 分类快捷入口
+    // 站点切换：只有一个站点时没有切换的意义，直接不占位。
+    final sites = ref.watch(enabledSitesProvider);
+    if (sites.length > 1) {
+      slivers.add(
+        SliverToBoxAdapter(
+          child: PqContent(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: _SiteBar(sites: sites),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 类型快捷入口：Material 3 的 ChoiceChip 横向滚动。
     slivers.add(
       SliverToBoxAdapter(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(PqAdaptive.gutter(context), 20, PqAdaptive.gutter(context), 6),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final kind in const ['电影', '剧集', '动漫', '综艺', '纪录片'])
-                _KindChip(label: kind),
-              const _KindChip(label: '全部', outlined: true),
-            ],
+        child: PqContent(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 16, bottom: 8),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final kind in const ['电影', '剧集', '动漫', '综艺', '纪录片'])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(kind),
+                        selected: false,
+                        onSelected: (_) => context.go(
+                          '/discover?kind=${Uri.encodeComponent(kind)}',
+                        ),
+                      ),
+                    ),
+                  ChoiceChip(
+                    label: const Text('全部'),
+                    selected: false,
+                    onSelected: (_) => context.go('/discover'),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -124,11 +159,10 @@ class HomePage extends ConsumerWidget {
     if (history.isNotEmpty) {
       slivers.add(
         SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 26),
-            child: PqContent(
+          child: PqContent(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 16, bottom: 12),
               child: PqSectionHeader(
-                eyebrow: 'CONTINUE',
                 title: '继续观看',
                 subtitle: '${history.length} 条记录',
                 action: TextButton(
@@ -143,7 +177,7 @@ class HomePage extends ConsumerWidget {
       slivers.add(
         SliverToBoxAdapter(
           child: SizedBox(
-            height: 196,
+            height: 216,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: EdgeInsets.symmetric(horizontal: PqAdaptive.gutter(context)),
@@ -188,14 +222,15 @@ class HomePage extends ConsumerWidget {
         SliverToBoxAdapter(
           child: PqContent(
             child: Padding(
-              padding: EdgeInsets.only(top: r == 0 ? 30 : 34, bottom: 14),
+              padding: const EdgeInsets.only(top: 24, bottom: 12),
               child: PqSectionHeader(
-                eyebrow: 'RAIL ${(r + 1).toString().padLeft(2, '0')}',
                 title: entry.key,
                 subtitle: '${entry.value.length} 部',
                 action: TextButton(
-                  onPressed: () => context.go('/discover?kind=${Uri.encodeComponent(entry.key)}'),
-                  child: const Text('全部'),
+                  onPressed: () => context.go(
+                    '/discover?kind=${Uri.encodeComponent(entry.key)}',
+                  ),
+                  child: const Text('查看全部'),
                 ),
               ),
             ),
@@ -215,19 +250,23 @@ class HomePage extends ConsumerWidget {
     if (data.failedSites.isNotEmpty) {
       slivers.add(
         SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(PqAdaptive.gutter(context), 22, PqAdaptive.gutter(context), 0),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline_rounded, size: 14, color: PqPalette.of(context).textFaint),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    '${data.failedSites.join('、')} 本次未响应，已跳过',
-                    style: PqType.bodySmall.copyWith(color: PqPalette.of(context).textFaint),
+          child: PqContent(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 24),
+              child: Card(
+                margin: EdgeInsets.zero,
+                elevation: 0,
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                child: ListTile(
+                  leading: const Icon(Icons.error_outline),
+                  title: Text('${data.failedSites.join('、')} 本次未响应'),
+                  subtitle: const Text('已跳过这些站点'),
+                  trailing: TextButton(
+                    onPressed: () => ref.invalidate(homeProvider),
+                    child: const Text('重试'),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -237,114 +276,26 @@ class HomePage extends ConsumerWidget {
     return slivers;
   }
 
-  Widget _skeleton(BuildContext context, bool compact) {
+  Widget _skeleton() {
     return SliverToBoxAdapter(
       child: Column(
         children: [
-          SizedBox(
-            height: compact ? 420 : 460,
+          const PqContent(
+            child: PqSkeleton(height: 420, radius: 12),
+          ),
+          const PqContent(
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: PqAdaptive.gutter(context)),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: const PqSkeleton(height: double.infinity, radius: 18),
+              padding: EdgeInsets.only(top: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  PqSkeleton(width: 120, height: 16),
+                  SizedBox(height: 16),
+                  PqPosterGridSkeleton(count: 6, columns: 3, gap: 12),
+                ],
               ),
             ),
           ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(PqAdaptive.gutter(context), 28, PqAdaptive.gutter(context), 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const PqSkeleton(width: 120, height: 16),
-                const SizedBox(height: 16),
-                PqPosterGridSkeleton(
-                  count: PqAdaptive.isCompact(context) ? 3 : 6,
-                  columns: PqAdaptive.isCompact(context) ? 3 : 6,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _KindChip extends StatelessWidget {
-  const _KindChip({required this.label, this.outlined = false});
-
-  final String label;
-  final bool outlined;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return PqPressable(
-      onTap: () {
-        if (label == '全部') {
-          context.go('/discover');
-        } else {
-          context.go('/discover?kind=${Uri.encodeComponent(label)}');
-        }
-      },
-      borderRadius: 9,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-        decoration: BoxDecoration(
-          color: outlined ? Colors.transparent : p.surfaceHigh,
-          borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: outlined ? p.line : p.lineSoft, width: 0.9),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: PqType.label.copyWith(
-                fontSize: 12,
-                color: outlined ? p.textMuted : p.text,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: 5),
-            Icon(Icons.arrow_outward_rounded, size: 11, color: p.textFaint),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MobileHeader extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        PqAdaptive.gutter(context),
-        MediaQuery.paddingOf(context).top + 14,
-        PqAdaptive.gutter(context),
-        0,
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const PqLogo(size: 24),
-              const Spacer(),
-              PqIconButton(
-                icon: ref.watch(settingsProvider).themeMode == ThemeMode.dark
-                    ? Icons.light_mode_outlined
-                    : Icons.dark_mode_outlined,
-                onTap: () => ref.read(settingsProvider.notifier).toggleTheme(),
-              ),
-              PqIconButton(
-                icon: Icons.search_rounded,
-                onTap: () => context.push('/search'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
         ],
       ),
     );
@@ -358,31 +309,83 @@ class _Footer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
     final loaded = stats?.loadedSites ?? 0;
-    return PqContent(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Divider(color: p.lineSoft),
-          const SizedBox(height: 16),
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(),
+        const SizedBox(height: 12),
+        Text(
+          'Poqi 聚合了 $loaded 个站点 · 局域网 MCP · 插件工坊',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 首页的站点切换条：与顶栏共用 `selectedSiteProvider`。
+///
+/// 顶栏适合"切到某个站"，这里适合"扫一眼有哪些站、顺手切过去"，
+/// 所以在首页用一排 ChoiceChip 呈现，而不是再放一个下拉。
+class _SiteBar extends ConsumerWidget {
+  const _SiteBar({required this.sites});
+
+  final List<SiteBinding> sites;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final selected = ref.watch(selectedSiteProvider);
+
+    void pick(String? id) =>
+        ref.read(selectedSiteProvider.notifier).state = id;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.dns_outlined,
+              size: 16,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '站点',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
             children: [
-              const PqLogo(size: 18, showWordmark: false),
-              const SizedBox(width: 10),
-              Text(
-                'Poqi 聚合了 $loaded 个站点',
-                style: PqType.bodySmall.copyWith(color: p.textFaint, fontSize: 11.5),
+              ChoiceChip(
+                label: const Text('全部'),
+                selected: selected == null,
+                onSelected: (_) => pick(null),
               ),
-              const Spacer(),
-              Text(
-                '局域网 MCP · 插件工坊',
-                style: PqType.eyebrow.copyWith(color: p.textFaint.withOpacity(0.7)),
-              ),
+              for (final s in sites)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: ChoiceChip(
+                    label: Text(s.name),
+                    selected: selected == s.id,
+                    onSelected: (_) => pick(s.id),
+                  ),
+                ),
             ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

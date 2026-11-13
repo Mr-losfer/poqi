@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 
-import '../../core/design/pq_theme.dart';
 import '../../core/ui/adaptive.dart';
 import '../../core/ui/poster.dart';
 import '../../core/ui/primitives.dart';
@@ -219,96 +218,52 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     if (detail == null) return;
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: PqPalette.of(context).surfaceHigh,
       isScrollControlled: true,
       useSafeArea: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
+      showDragHandle: true,
       builder: (ctx) {
         return Consumer(builder: (ctx, ref, _) {
+          final theme = Theme.of(ctx);
           final current = ref.watch(playerProvider);
-          return DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.55,
-            maxChildSize: 0.9,
-            minChildSize: 0.3,
-            builder: (ctx, scroll) {
-              return ListView(
-                controller: scroll,
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-                children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: PqPalette.of(ctx).line,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+          return ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
+            ),
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              children: [
+                Text('选集', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 12),
+                for (var li = 0; li < detail.lines.length; li++) ...[
+                  Text(
+                    detail.lines[li].name,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Text('选集', style: PqType.h2),
-                  const SizedBox(height: 12),
-                  for (var li = 0; li < detail.lines.length; li++) ...[
-                    Text(
-                      detail.lines[li].name,
-                      style: PqType.label.copyWith(
-                        color: PqPalette.of(ctx).textFaint,
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (var ei = 0; ei < detail.lines[li].episodes.length; ei++)
-                          Builder(builder: (context) {
-                            final active =
-                                current.lineIndex == li && current.episodeIndex == ei;
-                            final pp = PqPalette.of(context);
-                            return GestureDetector(
-                              onTap: () {
-                                Navigator.pop(ctx);
-                                _videoUrl = null;
-                                ref.read(playerProvider.notifier).selectEpisode(li, ei);
-                              },
-                              child: Container(
-                                constraints: const BoxConstraints(minWidth: 64),
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                                decoration: BoxDecoration(
-                                  color: active
-                                      ? pp.accent.withOpacity(0.16)
-                                      : pp.surfaceHigh,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: active
-                                        ? pp.accent.withOpacity(0.55)
-                                        : pp.lineSoft,
-                                    width: 0.9,
-                                  ),
-                                ),
-                                child: Text(
-                                  detail.lines[li].episodes[ei].name,
-                                  textAlign: TextAlign.center,
-                                  style: PqType.label.copyWith(
-                                    fontSize: 12,
-                                    color: active ? pp.accent : pp.textMuted,
-                                  ),
-                                ),
-                              ),
-                            );
-                          }),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                  ],
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (var ei = 0; ei < detail.lines[li].episodes.length; ei++)
+                        ChoiceChip(
+                          label: Text(detail.lines[li].episodes[ei].name),
+                          selected:
+                              current.lineIndex == li && current.episodeIndex == ei,
+                          onSelected: (_) {
+                            Navigator.pop(ctx);
+                            _videoUrl = null;
+                            ref.read(playerProvider.notifier).selectEpisode(li, ei);
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
                 ],
-              );
-            },
+              ],
+            ),
           );
         });
       },
@@ -317,91 +272,92 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   void _showDiagnostics(BuildContext context) {
     final ps = ref.read(playerProvider);
-    final p = PqPalette.of(context);
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: p.surfaceHigh,
       isScrollControlled: true,
       useSafeArea: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('播放诊断', style: PqType.h2),
-            const SizedBox(height: 6),
-            Text(
-              '播放失败时会自动到其它站点寻找同一集。下面是本次尝试记录。',
-              style: PqType.bodySmall.copyWith(color: p.textMuted),
-            ),
-            const SizedBox(height: 16),
-            if (ps.attempts.isEmpty)
-              Text('暂无记录', style: PqType.bodySmall.copyWith(color: p.textFaint))
-            else
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: ps.attempts.length,
-                  separatorBuilder: (_, __) => Divider(color: p.lineSoft),
-                  itemBuilder: (context, i) {
-                    final a = ps.attempts[i];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      child: Row(
-                        children: [
-                          Icon(
-                            a.ok ? Icons.check_circle_outline : Icons.error_outline,
-                            size: 16,
-                            color: a.ok ? p.sage : p.danger,
+      showDragHandle: true,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        final scheme = theme.colorScheme;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('播放诊断', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 6),
+              Text(
+                '播放失败时会自动到其它站点寻找同一集。下面是本次尝试记录。',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+              if (ps.attempts.isEmpty)
+                Text(
+                  '暂无记录',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                )
+              else
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < ps.attempts.length; i++) ...[
+                        if (i > 0) const Divider(height: 1),
+                        ListTile(
+                          leading: Icon(
+                            ps.attempts[i].ok
+                                ? Icons.check_circle_outline
+                                : Icons.error_outline,
+                            color: ps.attempts[i].ok ? scheme.tertiary : scheme.error,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${a.siteName} · ${a.episodeName}',
-                                  style: PqType.bodySmall.copyWith(color: p.text, fontSize: 12.5),
-                                ),
-                                if (a.message != null)
-                                  Text(
-                                    a.message!,
-                                    style: PqType.bodySmall.copyWith(
-                                      color: p.textFaint,
-                                      fontSize: 11,
-                                    ),
+                          title: Text(
+                            '${ps.attempts[i].siteName} · ${ps.attempts[i].episodeName}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: ps.attempts[i].message == null
+                              ? null
+                              : Text(
+                                  ps.attempts[i].message!,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: ps.attempts[i].ok
+                                        ? scheme.onSurfaceVariant
+                                        : scheme.error,
                                   ),
-                              ],
-                            ),
-                          ),
-                        ],
+                                ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              if (ps.source != null) ...[
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: SelectableText(
+                        ps.source!.url,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
-              ),
-            const SizedBox(height: 16),
-            if (ps.source != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: p.canvas,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: p.lineSoft),
-                ),
-                child: Text(
-                  ps.source!.url,
-                  style: PqType.mono.copyWith(fontSize: 11, color: p.textMuted),
-                ),
-              ),
-          ],
-        ),
-      ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -415,7 +371,7 @@ class _Stage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
     final w = MediaQuery.sizeOf(context).width;
     final h = MediaQuery.sizeOf(context).height;
 
@@ -442,20 +398,20 @@ class _Stage extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               state.fallbackNote ?? '正在解析片源…',
-              style: PqType.bodySmall.copyWith(color: p.textMuted),
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
             ),
             if (state.attempts.isNotEmpty) ...[
               const SizedBox(height: 10),
               Text(
                 state.attempts.map((e) => e.siteName).join(' → '),
-                style: PqType.eyebrow.copyWith(color: p.textFaint),
+                style: theme.textTheme.labelSmall?.copyWith(color: Colors.white54),
               ),
             ],
           ],
         ),
       );
     } else {
-      // 模拟放映：没有真实视频流时的放映室氛围
+      // 模拟放映：没有真实视频流时的海报舞台
       content = Stack(
         fit: StackFit.expand,
         children: [
@@ -466,37 +422,29 @@ class _Stage extends StatelessWidget {
             glyphSize: 0.55,
             dim: 0.35,
           ),
-          const _Scanlines(),
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.black.withOpacity(0.35),
-                    border: Border.all(color: Colors.white.withOpacity(0.18)),
-                  ),
-                  child: Icon(
-                    state.playing ? Icons.graphic_eq_rounded : Icons.play_arrow_rounded,
-                    color: Colors.white.withOpacity(0.9),
-                    size: 28,
-                  ),
+                const CircleAvatar(
+                  radius: 32,
+                  backgroundColor: Colors.black45,
+                  child: Icon(Icons.play_arrow, size: 32, color: Colors.white),
                 ),
+                if (state.playing)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Icon(Icons.graphic_eq, size: 20, color: Colors.white70),
+                  ),
                 const SizedBox(height: 14),
                 Text(
                   state.episode?.name ?? '演示片源',
-                  style: PqType.title.copyWith(color: Colors.white.withOpacity(0.9)),
+                  style: theme.textTheme.titleMedium?.copyWith(color: Colors.white),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '内置演示源 · 无真实视频流',
-                  style: PqType.bodySmall.copyWith(
-                    color: Colors.white.withOpacity(0.45),
-                    fontSize: 11.5,
-                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.white54),
                 ),
               ],
             ),
@@ -510,20 +458,23 @@ class _Stage extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.videocam_off_outlined, size: 34, color: p.textMuted),
+            const Icon(Icons.videocam_off_outlined, size: 34, color: Colors.white54),
             const SizedBox(height: 12),
-            Text('该设备无法解码此片源', style: PqType.title),
+            Text(
+              '该设备无法解码此片源',
+              style: theme.textTheme.titleMedium?.copyWith(color: Colors.white),
+            ),
             const SizedBox(height: 6),
             Text(
               '可以换一条线路或其它站点再试',
-              style: PqType.bodySmall.copyWith(color: p.textFaint),
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.white54),
             ),
           ],
         ),
       );
     }
 
-    return Container(
+    return ColoredBox(
       color: Colors.black,
       child: Center(
         child: ConstrainedBox(
@@ -541,74 +492,6 @@ class _Stage extends StatelessWidget {
   }
 }
 
-class _Scanlines extends StatefulWidget {
-  const _Scanlines();
-
-  @override
-  State<_Scanlines> createState() => _ScanlinesState();
-}
-
-class _ScanlinesState extends State<_Scanlines> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 9),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (context, _) => CustomPaint(
-          painter: _ScanlinePainter(_c.value),
-          size: Size.infinite,
-        ),
-      ),
-    );
-  }
-}
-
-class _ScanlinePainter extends CustomPainter {
-  _ScanlinePainter(this.t);
-
-  final double t;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..strokeWidth = 1;
-    for (var i = 0; i < 22; i++) {
-      final y = size.height * i / 22;
-      paint.color = Colors.white.withOpacity(0.018 + (i % 3) * 0.006);
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-    // 缓慢移动的光带
-    final y = size.height * t;
-    final rect = Rect.fromLTWH(0, y - 60, size.width, 120);
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.white.withOpacity(0),
-            Colors.white.withOpacity(0.05),
-            Colors.white.withOpacity(0),
-          ],
-        ).createShader(rect),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _ScanlinePainter old) => old.t != t;
-}
-
 class _FailedCard extends StatelessWidget {
   const _FailedCard({required this.state});
 
@@ -616,38 +499,35 @@ class _FailedCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Container(
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 420),
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: p.surfaceHigh.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: p.line),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.portable_wifi_off_rounded, size: 30, color: p.danger),
-          const SizedBox(height: 12),
-          Text('这一集暂时放不出来', style: PqType.h2.copyWith(fontSize: 16)),
-          const SizedBox(height: 8),
-          Text(
-            state.error ?? '所有站点都没有返回可用的播放地址',
-            textAlign: TextAlign.center,
-            style: PqType.bodySmall.copyWith(color: p.textMuted, height: 1.6),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              OutlinedButton(
+              Icon(Icons.portable_wifi_off_outlined, size: 30, color: scheme.error),
+              const SizedBox(height: 12),
+              Text('这一集暂时放不出来', style: theme.textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Text(
+                state.error ?? '所有站点都没有返回可用的播放地址',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.tonal(
                 onPressed: () => context.pop(),
                 child: const Text('返回详情'),
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -690,191 +570,173 @@ class _Controls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    final compact = PqAdaptive.isCompact(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final total = duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds;
     final progress = (position.inMilliseconds / total).clamp(0.0, 1.0);
 
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withOpacity(0.55),
-            Colors.black.withOpacity(0.0),
-            Colors.black.withOpacity(0.0),
-            Colors.black.withOpacity(0.78),
-          ],
-          stops: const [0, 0.24, 0.6, 1],
-        ),
-      ),
-      child: SafeArea(
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 6, 12, 0),
-              child: Row(
-                children: [
-                  PqIconButton(
-                    icon: Icons.arrow_back_rounded,
-                    onTap: () => onBack(),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          state.item?.title ?? '',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: PqType.title.copyWith(color: Colors.white),
-                        ),
-                        Text(
-                          [
-                            state.site?.name ?? '',
-                            state.line?.name ?? '',
-                            state.episode?.name ?? '',
-                          ].where((e) => e.isNotEmpty).join(' · '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: PqType.bodySmall.copyWith(
-                            color: Colors.white.withOpacity(0.55),
-                            fontSize: 11,
+            Material(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(12),
+              clipBehavior: Clip.antiAlias,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => onBack(),
+                      icon: const Icon(Icons.arrow_back),
+                      color: Colors.white,
+                      tooltip: '返回',
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            state.item?.title ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium
+                                ?.copyWith(color: Colors.white),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (state.mode == PlaybackMode.simulated)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.white.withOpacity(0.14)),
-                      ),
-                      child: Text(
-                        '演示片源',
-                        style: PqType.label.copyWith(
-                          fontSize: 10,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
+                          Text(
+                            [
+                              state.site?.name ?? '',
+                              state.line?.name ?? '',
+                              state.episode?.name ?? '',
+                            ].where((e) => e.isNotEmpty).join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: Colors.white70),
+                          ),
+                        ],
                       ),
                     ),
-                  IconButton(
-                    onPressed: onDiagnostics,
-                    icon: const Icon(Icons.monitor_heart_outlined, size: 18),
-                    color: Colors.white.withOpacity(0.7),
-                    tooltip: '播放诊断',
-                  ),
-                ],
+                    if (state.mode == PlaybackMode.simulated)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 8),
+                        child: PqTag('演示片源'),
+                      ),
+                    IconButton(
+                      onPressed: onDiagnostics,
+                      icon: const Icon(Icons.monitor_heart_outlined),
+                      color: Colors.white70,
+                      tooltip: '播放诊断',
+                    ),
+                  ],
+                ),
               ),
             ),
             const Spacer(),
             // 中央播放键
             if (!playing && state.mode != PlaybackMode.failed)
-              GestureDetector(
-                onTap: onToggle,
-                child: Container(
-                  width: 68,
-                  height: 68,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: p.accent,
-                    boxShadow: [
-                      BoxShadow(
-                        color: p.accent.withOpacity(0.35),
-                        blurRadius: 32,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Icon(Icons.play_arrow_rounded, size: 36, color: p.onAccent),
+              IconButton.filled(
+                onPressed: onToggle,
+                icon: const Icon(Icons.play_arrow),
+                iconSize: 36,
+                tooltip: '播放',
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(68, 68),
+                  backgroundColor: scheme.primary,
+                  foregroundColor: scheme.onPrimary,
                 ),
               ),
             if (state.mode == PlaybackMode.failed)
-              FilledButton.icon(
+              FilledButton.tonalIcon(
                 onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('重新尝试'),
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
               ),
             const Spacer(),
-            Padding(
-              padding: EdgeInsets.fromLTRB(compact ? 12 : 20, 0, compact ? 12 : 20, 10),
-              child: Column(
-                children: [
-                  _Scrubber(
-                    progress: progress,
-                    onSeek: (f) => onSeek(
-                      Duration(milliseconds: (total * f).round()),
+            Material(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(12),
+              clipBehavior: Clip.antiAlias,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                child: Column(
+                  children: [
+                    _Scrubber(
+                      scheme: scheme,
+                      progress: progress,
+                      onSeek: (f) => onSeek(
+                        Duration(milliseconds: (total * f).round()),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      IconButton(
-                        onPressed: onToggle,
-                        icon: Icon(
-                          playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                          size: 24,
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: onToggle,
+                          icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                          color: Colors.white,
+                          tooltip: playing ? '暂停' : '播放',
                         ),
-                        color: Colors.white,
-                        tooltip: playing ? '暂停' : '播放',
-                      ),
-                      IconButton(
-                        onPressed: onPrev,
-                        icon: const Icon(Icons.skip_previous_rounded, size: 21),
-                        color: Colors.white.withOpacity(0.8),
-                        tooltip: '上一集',
-                      ),
-                      IconButton(
-                        onPressed: onNext,
-                        icon: const Icon(Icons.skip_next_rounded, size: 21),
-                        color: Colors.white.withOpacity(0.8),
-                        tooltip: '下一集',
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '${_fmt(position)} / ${duration.inSeconds == 0 ? '--:--' : _fmt(duration)}',
-                        style: PqType.mono.copyWith(
-                          color: Colors.white.withOpacity(0.75),
-                          fontSize: 11.5,
+                        IconButton(
+                          onPressed: onPrev,
+                          icon: const Icon(Icons.skip_previous),
+                          color: Colors.white70,
+                          tooltip: '上一集',
                         ),
-                      ),
-                      const Spacer(),
-                      if (!compact) ...[
-                        _GhostButton(
-                          label: '选集',
-                          icon: Icons.list_rounded,
-                          onTap: onEpisodes,
+                        IconButton(
+                          onPressed: onNext,
+                          icon: const Icon(Icons.skip_next),
+                          color: Colors.white70,
+                          tooltip: '下一集',
                         ),
-                        const SizedBox(width: 8),
-                        _SpeedMenu(speed: state.speed, onChanged: onSpeed),
-                        const SizedBox(width: 8),
-                      ] else
-                        _GhostButton(
-                          label: '选集',
-                          icon: Icons.list_rounded,
-                          onTap: onEpisodes,
+                        const SizedBox(width: 4),
+                        Text(
+                          '${_fmt(position)} / ${duration.inSeconds == 0 ? '--:--' : _fmt(duration)}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontFamily: 'monospace',
+                            color: Colors.white70,
+                          ),
                         ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        onPressed: onFullscreen,
-                        icon: Icon(
-                          immersive
-                              ? Icons.fullscreen_exit_rounded
-                              : Icons.fullscreen_rounded,
-                          size: 21,
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: onEpisodes,
+                          icon: const Icon(Icons.list, size: 18),
+                          label: const Text('选集'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            visualDensity: VisualDensity.compact,
+                          ),
                         ),
-                        color: Colors.white.withOpacity(0.8),
-                        tooltip: '全屏',
-                      ),
-                    ],
-                  ),
-                ],
+                        PopupMenuButton<double>(
+                          tooltip: '倍速',
+                          icon: const Icon(Icons.speed, color: Colors.white70),
+                          onSelected: onSpeed,
+                          itemBuilder: (context) => [
+                            for (final s in const [0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
+                              CheckedPopupMenuItem<double>(
+                                value: s,
+                                checked: s == state.speed,
+                                child: Text('${s}x'),
+                              ),
+                          ],
+                        ),
+                        IconButton(
+                          onPressed: onFullscreen,
+                          icon: Icon(
+                            immersive
+                                ? Icons.fullscreen_exit
+                                : Icons.fullscreen,
+                          ),
+                          color: Colors.white70,
+                          tooltip: '全屏',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -892,8 +754,13 @@ class _Controls extends StatelessWidget {
 }
 
 class _Scrubber extends StatefulWidget {
-  const _Scrubber({required this.progress, required this.onSeek});
+  const _Scrubber({
+    required this.scheme,
+    required this.progress,
+    required this.onSeek,
+  });
 
+  final ColorScheme scheme;
   final double progress;
   final ValueChanged<double> onSeek;
 
@@ -906,128 +773,24 @@ class _ScrubberState extends State<_Scrubber> {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    final value = _dragging ?? widget.progress;
-    return LayoutBuilder(
-      builder: (context, c) {
-        void seek(double dx) {
-          final f = (dx / c.maxWidth).clamp(0.0, 1.0);
-          setState(() => _dragging = f);
-        }
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (d) => seek(d.localPosition.dx),
-          onTapUp: (d) {
-            widget.onSeek((d.localPosition.dx / c.maxWidth).clamp(0.0, 1.0));
-            setState(() => _dragging = null);
-          },
-          onHorizontalDragStart: (d) => seek(d.localPosition.dx),
-          onHorizontalDragUpdate: (d) => seek(d.localPosition.dx),
-          onHorizontalDragEnd: (_) {
-            widget.onSeek(value);
-            setState(() => _dragging = null);
-          },
-          child: SizedBox(
-            height: 22,
-            child: Stack(
-              alignment: Alignment.centerLeft,
-              children: [
-                Container(
-                  height: 3,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.18),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                FractionallySizedBox(
-                  widthFactor: value.clamp(0.0, 1.0),
-                  child: Container(
-                    height: 3,
-                    decoration: BoxDecoration(
-                      color: p.accent,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment(value.clamp(0.0, 1.0) * 2 - 1, 0),
-                  child: Container(
-                    width: _dragging != null ? 13 : 9,
-                    height: _dragging != null ? 13 : 9,
-                    decoration: BoxDecoration(
-                      color: p.accent,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withOpacity(0.85), width: 1.4),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _GhostButton extends StatelessWidget {
-  const _GhostButton({required this.label, required this.icon, required this.onTap});
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, size: 16),
-      label: Text(label, style: PqType.label.copyWith(fontSize: 12)),
-      style: TextButton.styleFrom(
-        foregroundColor: Colors.white.withOpacity(0.78),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    final value = (_dragging ?? widget.progress).clamp(0.0, 1.0);
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: 2,
+        activeTrackColor: widget.scheme.primary,
+        inactiveTrackColor: Colors.white24,
+        thumbColor: widget.scheme.primary,
+        overlayColor: widget.scheme.primary.withOpacity(0.2),
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
       ),
-    );
-  }
-}
-
-class _SpeedMenu extends StatelessWidget {
-  const _SpeedMenu({required this.speed, required this.onChanged});
-
-  final double speed;
-  final ValueChanged<double> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<double>(
-      tooltip: '倍速',
-      color: PqPalette.of(context).surfaceHigher,
-      onSelected: onChanged,
-      itemBuilder: (context) => [
-        for (final s in const [0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
-          PopupMenuItem(
-            value: s,
-            child: Text(
-              '${s}x',
-              style: PqType.bodySmall.copyWith(
-                color: s == speed ? PqPalette.of(context).accent : null,
-              ),
-            ),
-          ),
-      ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          children: [
-            Icon(Icons.speed_rounded, size: 16, color: Colors.white.withOpacity(0.78)),
-            const SizedBox(width: 5),
-            Text(
-              '${speed}x',
-              style: PqType.label.copyWith(fontSize: 12, color: Colors.white.withOpacity(0.78)),
-            ),
-          ],
-        ),
+      child: Slider(
+        value: value,
+        onChanged: (v) => setState(() => _dragging = v),
+        onChangeEnd: (v) {
+          widget.onSeek(v);
+          setState(() => _dragging = null);
+        },
       ),
     );
   }

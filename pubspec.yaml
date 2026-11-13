@@ -1,7 +1,7 @@
 name: poqi
 description: "Poqi — 把散落的影像收进一只盒子。局域网 MCP 驱动的影视聚合与插件平台。"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.5.4
@@ -25,6 +25,7 @@ dependencies:
   url_launcher: ^6.3.1
   uuid: ^4.5.1
   video_player: ^2.9.2
+  flutter_js: ^0.8.7
 
 dev_dependencies:
   flutter_test:
@@ -35,7 +36,3 @@ flutter:
   uses-material-design: true
   assets:
     - assets/brand/
-  fonts:
-    - family: Bricolage
-      fonts:
-        - asset: assets/fonts/BricolageGrotesque.ttf

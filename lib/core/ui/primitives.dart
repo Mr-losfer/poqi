@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import '../design/pq_theme.dart';
 import 'adaptive.dart';
 
-/// 按压回弹：移动端给出 0.97 的即时反馈。
-class PqPressable extends StatefulWidget {
+/// 可点击区域。
+///
+/// 标准 Material 交互：水波纹（InkWell）+ 鼠标指针 + 焦点高亮，
+/// 不再用自定义缩放回弹——那属于品牌化微交互，不是 Material 规范。
+class PqPressable extends StatelessWidget {
   const PqPressable({
     super.key,
     required this.child,
@@ -18,40 +21,28 @@ class PqPressable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// 保留参数以兼容旧调用点；Material 标准交互不使用缩放反馈。
   final double scale;
   final double borderRadius;
   final MouseCursor cursor;
 
   @override
-  State<PqPressable> createState() => _PqPressableState();
-}
-
-class _PqPressableState extends State<PqPressable> {
-  bool _down = false;
-
-  @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: widget.cursor,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: widget.onTap == null ? null : (_) => setState(() => _down = true),
-        onTapCancel: () => setState(() => _down = false),
-        onTapUp: (_) => setState(() => _down = false),
-        onTap: widget.onTap,
-        onLongPress: widget.onLongPress,
-        child: AnimatedScale(
-          scale: _down ? widget.scale : 1,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-          child: widget.child,
-        ),
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(borderRadius),
+        mouseCursor: onTap == null ? MouseCursor.defer : cursor,
+        child: child,
       ),
     );
   }
 }
 
-/// 分区标题：一个全大写 eyebrow + 主标题 + 右侧动作。
+/// 分区标题：eyebrow + 标题 + 右侧动作。
 class PqSectionHeader extends StatelessWidget {
   const PqSectionHeader({
     super.key,
@@ -70,11 +61,12 @@ class PqSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Padding(
       padding: padding,
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
             child: Column(
@@ -84,9 +76,13 @@ class PqSectionHeader extends StatelessWidget {
                 if (eyebrow != null) ...[
                   Text(
                     eyebrow!.toUpperCase(),
-                    style: PqType.eyebrow.copyWith(color: p.accent.withOpacity(0.85)),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.primary,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                  const SizedBox(height: 7),
+                  const SizedBox(height: 4),
                 ],
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -95,16 +91,20 @@ class PqSectionHeader extends StatelessWidget {
                     Flexible(
                       child: Text(
                         title,
-                        style: PqType.h2.copyWith(fontSize: 19, letterSpacing: -0.3),
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     if (subtitle != null) ...[
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Text(
                         subtitle!,
-                        style: PqType.bodySmall.copyWith(color: p.textFaint),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ],
@@ -112,13 +112,15 @@ class PqSectionHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (action != null) action!,
+          if (action != null) ...[const SizedBox(width: 8), action!],
         ],
       ),
     );
   }
 }
 
+/// 小标签：Material 3 的 tonal label chip 视觉，但不受 Chip 固定高度约束，
+/// 可以安全地贴在海报角标、表格行这类紧凑位置。
 class PqTag extends StatelessWidget {
   const PqTag(
     this.text, {
@@ -135,28 +137,26 @@ class PqTag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    final c = color ?? p.textMuted;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final c = color ?? scheme.onSurfaceVariant;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: filled ? c.withOpacity(0.16) : Colors.transparent,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: c.withOpacity(filled ? 0.0 : 0.35), width: 0.8),
+        color: filled ? c.withOpacity(0.16) : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(PqTokens.r8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 11, color: c),
+            Icon(icon, size: 12, color: c),
             const SizedBox(width: 4),
           ],
           Text(
             text,
-            style: PqType.label.copyWith(
-              fontSize: 10.5,
-              color: filled ? c : c.withOpacity(0.92),
-              letterSpacing: 0.3,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: filled ? c : scheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -165,16 +165,16 @@ class PqTag extends StatelessWidget {
   }
 }
 
-/// 图标按钮：hover 时出现柔和底色，选中态统一由 [active] 控制。
-class PqIconButton extends StatefulWidget {
+/// 图标按钮：Material 3 的 IconButton，选中态用 tonal 底色。
+class PqIconButton extends StatelessWidget {
   const PqIconButton({
     super.key,
     required this.icon,
     this.tooltip,
     this.onTap,
     this.active = false,
-    this.size = 38,
-    this.iconSize = 19,
+    this.size = 40,
+    this.iconSize = 20,
     this.badge,
   });
 
@@ -187,57 +187,31 @@ class PqIconButton extends StatefulWidget {
   final Widget? badge;
 
   @override
-  State<PqIconButton> createState() => _PqIconButtonState();
-}
-
-class _PqIconButtonState extends State<PqIconButton> {
-  bool _hover = false;
-
-  @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    final bg = widget.active
-        ? p.accent.withOpacity(0.16)
-        : (_hover ? p.surfaceHigh : Colors.transparent);
-    final fg = widget.active ? p.accent : p.textMuted;
-
-    final btn = MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          width: widget.size,
-          height: widget.size,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: widget.active ? p.accent.withOpacity(0.35) : Colors.transparent,
-              width: 0.8,
-            ),
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Icon(widget.icon, size: widget.iconSize, color: fg),
-              if (widget.badge != null)
-                Positioned(right: -4, top: -4, child: widget.badge!),
-            ],
-          ),
+    final scheme = Theme.of(context).colorScheme;
+    final button = IconButton(
+      onPressed: onTap,
+      iconSize: iconSize,
+      tooltip: tooltip,
+      isSelected: active,
+      style: IconButton.styleFrom(
+        minimumSize: Size(size, size),
+        maximumSize: Size(size, size),
+        padding: EdgeInsets.zero,
+        foregroundColor: active ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+        backgroundColor: active ? scheme.secondaryContainer : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(PqTokens.r8 * 2),
         ),
       ),
+      icon: Icon(icon),
     );
-    if (widget.tooltip == null) return btn;
-    return Tooltip(message: widget.tooltip!, child: btn);
+    if (badge == null) return button;
+    return Badge(label: badge, child: button);
   }
 }
 
-/// 细描边面板：整个应用的"卡片"基础，不使用投影。
+/// 面板：Material 3 的 Card（filled 风格 + 细描边）。
 class PqPanel extends StatelessWidget {
   const PqPanel({
     super.key,
@@ -258,23 +232,30 @@ class PqPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    final content = AnimatedContainer(
-      duration: const Duration(milliseconds: 160),
-      padding: padding,
-      decoration: BoxDecoration(
-        color: color ?? p.surface,
-        borderRadius: BorderRadius.circular(radius),
-        border: border ? Border.all(color: p.lineSoft, width: 0.9) : null,
-      ),
-      child: child,
+    final scheme = Theme.of(context).colorScheme;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(radius),
+      side: border
+          ? BorderSide(color: scheme.outlineVariant)
+          : BorderSide.none,
     );
-    if (onTap == null) return content;
-    return PqPressable(onTap: onTap, borderRadius: radius, child: content);
+
+    return Card(
+      elevation: 0,
+      color: color ?? scheme.surfaceContainerLow,
+      surfaceTintColor: Colors.transparent,
+      shape: shape,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: shape,
+        child: Padding(padding: padding, child: child),
+      ),
+    );
   }
 }
 
-/// 自定义分段控件：滑块跟随选中项移动。
+/// 分段控件：直接使用 Material 3 的 [SegmentedButton]。
 class PqSegmented extends StatelessWidget {
   const PqSegmented({
     super.key,
@@ -291,52 +272,30 @@ class PqSegmented extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: p.surfaceHigh,
-        borderRadius: BorderRadius.circular(11),
-        border: Border.all(color: p.lineSoft, width: 0.8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < items.length; i++)
-            GestureDetector(
-              onTap: () => onChanged(i),
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOutCubic,
-                padding: EdgeInsets.symmetric(
-                  horizontal: compact ? 10 : 14,
-                  vertical: compact ? 6 : 8,
-                ),
-                decoration: BoxDecoration(
-                  color: i == index ? p.surfaceHigher : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: i == index ? p.line : Colors.transparent,
-                    width: 0.8,
-                  ),
-                ),
-                child: Text(
-                  items[i],
-                  style: PqType.label.copyWith(
-                    fontSize: compact ? 11.5 : 12.5,
-                    color: i == index ? p.text : p.textFaint,
-                  ),
-                ),
+    return SegmentedButton<int>(
+      segments: [
+        for (var i = 0; i < items.length; i++)
+          ButtonSegment<int>(value: i, label: Text(items[i])),
+      ],
+      selected: {index},
+      onSelectionChanged: (s) {
+        if (s.isNotEmpty) onChanged(s.first);
+      },
+      showSelectedIcon: false,
+      style: compact
+          ? const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: WidgetStatePropertyAll(
+                TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
               ),
-            ),
-        ],
-      ),
+            )
+          : null,
     );
   }
 }
 
-/// 搜索框：桌面显示快捷键提示，移动端为纯输入。
+/// 搜索框：Material 3 的全圆角 outlined 输入框。
 class PqSearchField extends StatefulWidget {
   const PqSearchField({
     super.key,
@@ -361,95 +320,83 @@ class PqSearchField extends StatefulWidget {
 
 class _PqSearchFieldState extends State<PqSearchField> {
   late final TextEditingController _c = widget.controller ?? TextEditingController();
-  final _focus = FocusNode();
-  bool _hover = false;
 
   @override
   void dispose() {
     if (widget.controller == null) _c.dispose();
-    _focus.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final expanded = PqAdaptive.isExpanded(context);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        height: 40,
-        decoration: BoxDecoration(
-          color: p.surfaceHigh,
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(
-            color: _focus.hasFocus
-                ? p.accent.withOpacity(0.55)
-                : (_hover ? p.line : p.lineSoft),
-            width: _focus.hasFocus ? 1.2 : 0.9,
+
+    return SizedBox(
+      height: 48,
+      child: TextField(
+        controller: _c,
+        autofocus: widget.autofocus,
+        textInputAction: TextInputAction.search,
+        onChanged: widget.onChanged,
+        onSubmitted: widget.onSubmit,
+        style: theme.textTheme.bodyMedium,
+        decoration: InputDecoration(
+          hintText: widget.hint,
+          isDense: true,
+          filled: true,
+          fillColor: scheme.surfaceContainerHigh,
+          prefixIcon: Icon(Icons.search, size: 20, color: scheme.onSurfaceVariant),
+          prefixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+          suffixIcon: widget.showShortcut && expanded
+              ? const Padding(
+                  padding: EdgeInsets.only(right: 12),
+                  child: Center(widthFactor: 1, child: PqKeyHint(label: 'Ctrl K')),
+                )
+              : null,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide.none,
           ),
-        ),
-        child: Row(
-          children: [
-            const SizedBox(width: 12),
-            Icon(Icons.search_rounded, size: 17, color: p.textFaint),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _c,
-                focusNode: _focus,
-                autofocus: widget.autofocus,
-                textInputAction: TextInputAction.search,
-                onChanged: widget.onChanged,
-                onSubmitted: widget.onSubmit,
-                style: PqType.body.copyWith(fontSize: 13.5),
-                cursorColor: p.accent,
-                cursorHeight: 16,
-                decoration: InputDecoration(
-                  isDense: true,
-                  filled: false,
-                  hintText: widget.hint,
-                  hintStyle: PqType.body.copyWith(fontSize: 13.5, color: p.textFaint),
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
-            if (widget.showShortcut && expanded)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: PqKeyHint(label: 'Ctrl K'),
-              )
-            else
-              const SizedBox(width: 8),
-          ],
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide(color: scheme.primary, width: 2),
+          ),
         ),
       ),
     );
   }
 }
 
-class PqKeyHint extends StatelessWidget {  const PqKeyHint({super.key, required this.label});
+class PqKeyHint extends StatelessWidget {
+  const PqKeyHint({super.key, required this.label});
 
   final String label;
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: p.surfaceHigher,
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: p.line, width: 0.8),
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(PqTokens.r4),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Text(
         label,
-        style: PqType.mono.copyWith(fontSize: 9.5, color: p.textFaint, height: 1.4),
+        style: theme.textTheme.labelSmall?.copyWith(
+          fontFamily: 'monospace',
+          fontSize: 10,
+          color: scheme.onSurfaceVariant,
+        ),
       ),
     );
   }
@@ -465,21 +412,22 @@ class PqMetaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 92,
-            child: Text(label, style: PqType.bodySmall.copyWith(color: p.textFaint)),
+            width: 96,
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
           ),
           Expanded(
-            child: Text(
-              value,
-              style: PqType.bodySmall.copyWith(color: p.text, fontSize: 13),
-            ),
+            child: Text(value, style: theme.textTheme.bodyMedium),
           ),
           if (trailing != null) trailing!,
         ],
@@ -488,7 +436,7 @@ class PqMetaRow extends StatelessWidget {
   }
 }
 
-/// 空状态：给出下一步动作，而不是只显示"暂无数据"。
+/// 空状态：图标 + 标题 + 说明 + 主操作。
 class PqEmptyState extends StatelessWidget {
   const PqEmptyState({
     super.key,
@@ -507,39 +455,41 @@ class PqEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Center(
       child: Padding(
-        padding: EdgeInsets.symmetric(vertical: compact ? 28 : 56, horizontal: 24),
+        padding: EdgeInsets.symmetric(vertical: compact ? 32 : 64, horizontal: 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 56,
-              height: 56,
+              width: 64,
+              height: 64,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: p.surfaceHigh,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: p.lineSoft),
+                color: scheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 24, color: p.textMuted),
+              child: Icon(icon, size: 28, color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
-            Text(title, style: PqType.title.copyWith(fontSize: 15)),
+            Text(title, style: theme.textTheme.titleMedium),
             if (message != null) ...[
               const SizedBox(height: 8),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 320),
+                constraints: const BoxConstraints(maxWidth: 360),
                 child: Text(
                   message!,
                   textAlign: TextAlign.center,
-                  style: PqType.bodySmall.copyWith(color: p.textMuted, height: 1.6),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ],
             if (action != null) ...[
-              const SizedBox(height: 18),
+              const SizedBox(height: 24),
               action!,
             ],
           ],
@@ -549,7 +499,7 @@ class PqEmptyState extends StatelessWidget {
   }
 }
 
-/// 返回按钮：在桌面带文字，移动端仅图标。
+/// 返回按钮：桌面带文字，移动端仅图标。
 class PqBackButton extends StatelessWidget {
   const PqBackButton({super.key, this.label = '返回'});
 
@@ -557,19 +507,11 @@ class PqBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = PqPalette.of(context);
-    final expanded = MediaQuery.sizeOf(context).width >= 700;
+    final expanded = MediaQuery.sizeOf(context).width >= 600;
     return TextButton.icon(
       onPressed: () => Navigator.of(context).maybePop(),
-      icon: Icon(Icons.arrow_back_rounded, size: 18, color: p.textMuted),
-      label: expanded
-          ? Text(label, style: PqType.label.copyWith(color: p.textMuted))
-          : const SizedBox.shrink(),
-      style: TextButton.styleFrom(
-        padding: EdgeInsets.symmetric(horizontal: expanded ? 10 : 8, vertical: 8),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
+      icon: const Icon(Icons.arrow_back, size: 20),
+      label: expanded ? Text(label) : const SizedBox.shrink(),
     );
   }
 }

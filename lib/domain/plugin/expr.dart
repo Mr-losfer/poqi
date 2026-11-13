@@ -753,6 +753,11 @@ Future<Object?> _namespace(
     case 'values':
       final v = a0();
       return v is Map ? v.values.toList() : <Object?>[];
+    case 'where':
+      return _filterByField(a0(), a1(), a2());
+    case 'find':
+      final hits = _filterByField(a0(), a1(), a2());
+      return hits.isEmpty ? null : hits.first;
 
     // --- JSON / 路径 ---
     case 'json':
@@ -845,6 +850,25 @@ Future<Object?> _namespace(
       return !PExpr.truthy(a0());
   }
   throw ExprException('未知函数 $name', pos);
+}
+
+/// `where/find` 共用的字段筛选；非 List 或元素非 Map 时安全返回空列表。
+List<Object?> _filterByField(Object? list, Object? key, Object? value) {
+  if (list is! List) return const [];
+  final field = PExpr.toStr(key);
+  final out = <Object?>[];
+  for (final item in list) {
+    if (item is! Map) continue;
+    if (_looseEquals(item[field], value)) out.add(item);
+  }
+  return out;
+}
+
+/// 宽松相等：数字 1 与字符串 "1" 视为相同，便于 `where(sites, 'type', 1)`。
+bool _looseEquals(Object? a, Object? b) {
+  if (identical(a, b)) return true;
+  if (a is num && b is num) return a == b;
+  return PExpr.toStr(a) == PExpr.toStr(b);
 }
 
 Future<Object?> _method(Object? recv, String name, List<Object?> args) async {
