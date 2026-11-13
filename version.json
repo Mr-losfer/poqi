@@ -5,5 +5,12 @@
   "notes": "插件改成单文件脚本：一个 .js 文件就是一个插件，网络请求、HTML 解析、输出结构全在脚本里；新增 pq.http 同步请求与 16 轮重放调度；内置插件重写为完整脚本示例。",
   "publishedAt": "2026-11-14T02:00:00Z",
   "htmlUrl": "https://github.com/Mr-losfer/poqi/releases/tag/v1.2.0",
-  "assets": []
+  "assets": [
+    {
+      "name": "poqi-1.2.0.apk",
+      "url": "https://github.com/Mr-losfer/poqi/releases/download/v1.2.0/poqi-1.2.0.apk",
+      "size": 62236417,
+      "sha256": "b54d9b2f6fe5df5ba2889d5b321a93efb7fef550cfdcdffe65c0818ce2bc1bac"
+    }
+  ]
 }
