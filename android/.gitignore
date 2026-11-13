@@ -6,8 +6,9 @@ gradle-wrapper.jar
 /local.properties
 GeneratedPluginRegistrant.java
 
-# Remember to never publicly share your keystore.
-# See https://flutter.dev/to/reference-keystore
-key.properties
-**/*.keystore
-**/*.jks
+# 通常签名文件不入库。Poqi 例外：为了让本地与 CI 构建出的 APK 签名一致
+# （否则用户无法覆盖安装更新），poqi-release.jks 与 key.properties 随仓库分发。
+# 若你 fork 并自行分发，请替换为你自己的密钥。
+!key.properties
+!app/poqi-release.jks
+
